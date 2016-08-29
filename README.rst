@@ -1,6 +1,10 @@
 .. image:: https://travis-ci.org/01org/cc-oci-runtime.svg?branch=master
    :target: https://travis-ci.org/01org/cc-oci-runtime
 
+.. image:: https://scan.coverity.com/projects/01org-cc-oci-runtime/badge.svg
+   :target: https://scan.coverity.com/projects/01org-cc-oci-runtime
+   :alt: Coverity Scan Build Status
+
 .. contents::
 .. sectnum::
 
@@ -56,17 +60,25 @@ are being worked on.
 Networking
 ~~~~~~~~~~
 
-Networking within the Clear Container is not currently available.
+Basic Networking within the Clear Container is available:
 
-Networking support is complicated by the way Dockers networking code
-assumes the runtime will create a traditional container.
+* Run a Clear Container using the default docker bridge network::
 
-This feature is currently WIP and is expected to land soon - a branch
-containing experimental code can be found here:
+  $ sudo docker run -it --net=bridge $image
 
-- https://github.com/01org/cc-oci-runtime/tree/networking
+  or simply::
 
-See https://github.com/01org/cc-oci-runtime/issues/38
+  $ sudo docker run -it $image
+
+* Run a Clear Container with networking disabled (only localhost is available)::
+
+  $ sudo docker run -it --net=none $image
+
+See:
+
+- https://github.com/01org/cc-oci-runtime/issues/38
+- https://github.com/01org/cc-oci-runtime/issues/81
+- https://github.com/01org/cc-oci-runtime/issues/82
 
 ``exec``
 ~~~~~~~~
@@ -124,6 +136,18 @@ Then, to run a Clear Container using the runtime, specify "``--runtime cor``".
 For example::
 
     $ sudo docker run --runtime cor -ti busybox
+
+Note that if you wish to pass options to the runtime such as
+``--global-log`` (see Logging_) and ``--debug`` (see Debugging_), you
+should instead configure Docker to invoke the helper script like this::
+
+    $ sudo dockerd --add-runtime cor=/usr/bin/cc-oci-runtime.sh
+
+The helper script will call the real runtime binary with the options you
+specify. Runtime options can either be passed to the runtime binary by
+creating a ``cc-oci-runtime.sh.cfg`` configuration file, or by modifying
+``/usr/bin/cc-oci-runtime.sh`` directly. See the contents of this script
+for instructions.
 
 Running under ``containerd`` (without Docker)
 ---------------------------------------------
@@ -339,6 +363,13 @@ written into the directory specified by "``--root``".  The default
 runtime state directory is ``/run/opencontainer/containers/`` if no
 "``--root``" argument is supplied.
 
+Additionally exist the possibility to log hypervisor's stderr and stdout into
+``$hypervisorLogDir/$containerId-hypervisor.stderr`` and
+``$hypervisorLogDir/$containerId-hypervisor.stdout`` respectively if the
+``--hypervisor-log-dir`` option is specified. Note that ``$hypervisorLogDir``
+and ``$containerId`` are variables provided by user through
+``--hypervisor-log-dir`` option and ``create`` command respectively.
+
 Note: Global logging is presently always enabled in the runtime,
 as ``containerd`` does not always invoke the runtime with the ``--log``
 argument, and enabling the global log in this case helps with debugging.
@@ -358,7 +389,7 @@ the OCI_ CLI and the runc_ CLI interfaces.
 
 Details of the runc_ command line options can be found in the `runc manpage`_.
 
-Note: The ``--global-log`` argument is unique to the runtime at present.
+Note: The ``--global-log`` and ``--hypervisor-log-dir`` arguments are unique to the runtime at present.
 
 Extensions
 ~~~~~~~~~~
@@ -406,6 +437,7 @@ Debugging
         --debug \
         --root /tmp/cor/ \
         --global-log /tmp/global.log \
+        --hypervisor-log-dir /tmp/ \
         start --console $(tty) $container $bundle_path
 
 - Consult the global Log (see Logging_).

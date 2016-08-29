@@ -232,6 +232,8 @@ START_TEST(test_cc_oci_expand_cmdline) {
 	gchar *image_size = g_strdup_printf ("%lu",
 			(unsigned long int)sizeof(image_contents)-1);
 	gchar *shell;
+	g_autofree gchar *cc_stdin = NULL;
+	g_autofree gchar *cc_stdout = NULL;
 
 	struct cc_oci_config config = { { 0 } };
 
@@ -301,7 +303,18 @@ START_TEST(test_cc_oci_expand_cmdline) {
 			sizeof (config.state.comms_path));
 
 	ck_assert (! config.console);
+	ck_assert (! config.bundle_path);
+
+	ck_assert (! cc_oci_expand_cmdline (&config, args));
+
+	config.bundle_path = g_strdup (tmpdir);
 	ck_assert (cc_oci_expand_cmdline (&config, args));
+
+	cc_stdin = g_build_path ("/", config.bundle_path,
+			"cc-std.in", NULL);
+	cc_stdout = g_build_path ("/", config.bundle_path,
+			"cc-std.out", NULL);
+
 	/* console should have been set */
 	ck_assert (config.console);
 	g_free (config.console);
@@ -374,6 +387,12 @@ START_TEST(test_cc_oci_expand_cmdline) {
 	ck_assert (! g_remove (config.vm->image_path));
 	ck_assert (! g_remove (config.vm->kernel_path));
 	ck_assert (! g_remove (config.oci.root.path));
+
+	if (! isatty (STDIN_FILENO)) {
+		ck_assert (! g_remove (cc_stdin));
+		ck_assert (! g_remove (cc_stdout));
+	}
+
 	ck_assert (! g_remove (tmpdir));
 	g_free (tmpdir);
 
@@ -392,6 +411,8 @@ START_TEST(test_cc_oci_vm_args_get) {
 	gchar *image_size = g_strdup_printf ("%lu",
 			(unsigned long int)sizeof(image_contents)-1);
 	gchar *invalid_dir = "/this/directory/must/not/exist";
+	g_autofree gchar *cc_stdin = NULL;
+	g_autofree gchar *cc_stdout = NULL;
 
 	tmpdir = g_dir_make_tmp (NULL, NULL);
 	ck_assert (tmpdir);
@@ -419,6 +440,11 @@ START_TEST(test_cc_oci_vm_args_get) {
 	ck_assert (! cc_oci_vm_args_get (&config, &args));
 
 	config.bundle_path = g_strdup (tmpdir);
+
+	cc_stdin = g_build_path ("/", config.bundle_path,
+			"cc-std.in", NULL);
+	cc_stdout = g_build_path ("/", config.bundle_path,
+			"cc-std.out", NULL);
 
 	/* no config.vm */
 	ck_assert (! cc_oci_vm_args_get (&config, &args));
@@ -498,12 +524,12 @@ START_TEST(test_cc_oci_vm_args_get) {
 	g_strfreev (args);
 
 	/* recreate the args file */
-	ret = g_file_set_contents (args_file, "hello\# comment\n", -1, NULL);
+	ret = g_file_set_contents (args_file, "hello\\# comment\n", -1, NULL);
 	ck_assert (ret);
 
 	ck_assert (cc_oci_vm_args_get (&config, &args));
 
-	ck_assert (! g_strcmp0 (args[0], "hello\# comment"));
+	ck_assert (! g_strcmp0 (args[0], "hello\\# comment"));
 	ck_assert (! args[1]);
 	g_strfreev (args);
 
@@ -594,6 +620,12 @@ START_TEST(test_cc_oci_vm_args_get) {
 	ck_assert (! g_remove (config.vm->image_path));
 	ck_assert (! g_remove (config.vm->kernel_path));
 	ck_assert (! g_remove (config.oci.root.path));
+
+	if (! isatty (STDIN_FILENO)) {
+		ck_assert (! g_remove (cc_stdin));
+		ck_assert (! g_remove (cc_stdout));
+	}
+
 	ck_assert (! g_remove (tmpdir));
 
 	g_free (args_file);
@@ -612,14 +644,13 @@ Suite* make_hypervisor_suite(void) {
 	return s;
 }
 
-gboolean enable_debug = true;
-
 int main (void) {
 	int number_failed;
 	Suite* s;
 	SRunner* sr;
 	struct cc_log_options options = { 0 };
 
+	options.enable_debug = true;
 	options.use_json = false;
 	options.filename = g_strdup ("hypervisor_test_debug.log");
 	(void)cc_oci_log_init(&options);

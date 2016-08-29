@@ -28,7 +28,7 @@ CHECK_DEPS =
 GIT_COMMIT := $(shell git rev-parse HEAD 2>/dev/null)
 
 commit_id:
-	if [ "x$(GIT_COMMIT)" != "x" ]; then \
+	$(AM_V_GEN)if [ "x$(GIT_COMMIT)" != "x" ]; then \
 		echo "Writing commit id"; \
 		echo $(GIT_COMMIT) > commit_id; \
 	else \
@@ -38,12 +38,25 @@ commit_id:
 
 STORED_COMMIT = $(shell cat commit_id 2>/dev/null)
 
+SYSCONFDIR = $(sysconfdir)/$(PACKAGE_NAME)
+DEFAULTSDIR = $(datadir)/defaults/$(PACKAGE_NAME)
+
 src/commands/cc_oci_runtime-version.$(OBJEXT): \
 	 commit_id
 
+data/cc-oci-runtime.sh: data/cc-oci-runtime.sh.in
+	$(AM_V_GEN)$(SED) \
+		-e 's|[@]PACKAGE_NAME[@]|$(PACKAGE_NAME)|g' \
+		-e 's|[@]bindir[@]|$(bindir)|g' \
+		-e 's|[@]SYSCONFDIR[@]|$(SYSCONFDIR)|g' \
+		-e 's|[@]DEFAULTSDIR[@]|$(DEFAULTSDIR)|g' \
+		"$<" > "$@"
+
+CLEANFILES += data/cc-oci-runtime.sh
+
 AM_CPPFLAGS = -I $(top_srcdir)/src -DG_LOG_DOMAIN=\"$(PACKAGE_NAME)\" \
-	-DSYSCONFDIR=\"$(sysconfdir)/$(PACKAGE_NAME)\" \
-	-DDEFAULTSDIR=\"$(datadir)/defaults/$(PACKAGE_NAME)\" \
+	-DSYSCONFDIR=\"$(SYSCONFDIR)\" \
+	-DDEFAULTSDIR=\"$(DEFAULTSDIR)\" \
 	-DGIT_COMMIT=\"$(STORED_COMMIT)\"
 
 defaultsdir = $(datadir)/defaults/$(PACKAGE_NAME)
@@ -64,6 +77,7 @@ DISTCHECK_CONFIGURE_FLAGS = \
 	--enable-functional-tests
 
 bin_PROGRAMS = cc-oci-runtime
+dist_bin_SCRIPTS = data/cc-oci-runtime.sh
 
 common_sources = \
 	src/util.c src/util.h \
@@ -148,7 +162,9 @@ EXTRA_DIST = \
 	data/vm.json.in \
 	tests/data \
 	commit_id \
+	versions.txt \
 	$(defaults_DATA) \
+	data/cc-oci-runtime.sh.in \
 	$(bats_test_sources)
 
 if CPPCHECK
@@ -161,7 +177,7 @@ endif
 
 if FUNCTIONAL_TEST
 CHECK_DEPS += functional-test
-functional-test:
+functional-test: cc-oci-runtime
 	@$(BATS_PATH) $(srcdir)/tests/functional/
 endif
 

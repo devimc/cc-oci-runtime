@@ -57,6 +57,7 @@
 #include "namespace.h"
 #include "networking.h"
 #include "common.h"
+#include "logging.h"
 
 static GMainLoop* main_loop = NULL;
 static GMainLoop* hook_loop = NULL;
@@ -186,6 +187,8 @@ cc_oci_setup_child (struct cc_oci_config *config)
 		cc_oci_close_fds ();
 	}
 
+	cc_oci_setup_hypervisor_logs(config);
+
 	return true;
 }
 
@@ -199,6 +202,7 @@ cc_oci_setup_child (struct cc_oci_config *config)
  * \note \p exit_code may be \c NULL to avoid returning the
  * child exit code.
  */
+#if 0
 static void
 cc_oci_child_watcher (GPid pid, gint status,
 		gpointer exit_code) {
@@ -212,6 +216,7 @@ cc_oci_child_watcher (GPid pid, gint status,
 
 	g_main_loop_quit (main_loop);
 }
+#endif
 
 /*!
  * Close spawned hook and stop the hook loop.
@@ -724,7 +729,7 @@ cc_oci_vm_launch (struct cc_oci_config *config)
 		g_debug ("reading netcfg from parent");
 
 		bytes = read (net_cfg_pipe[0], netcfg, len);
-		if (ret < 0) {
+		if (bytes < 0) {
 			goto child_failed;
 		}
 
@@ -999,17 +1004,19 @@ cc_oci_vm_connect (struct cc_oci_config *config,
 		int argc,
 		char *const argv[]) {
 	gchar     **args = NULL;
-	GError     *err = NULL;
 	gboolean    ret = false;
-	GPid        pid;
 	guint       args_len = 0;
-	gint        exit_code = -1;
 	gboolean    cmd_is_just_shell = false;
+#if 0
+	GError     *err = NULL;
+	GPid        pid;
+	gint        exit_code = -1;
 	GSpawnFlags flags = (G_SPAWN_CHILD_INHERITS_STDIN |
 			     /* XXX: required for g_child_watch_add! */
 			     G_SPAWN_DO_NOT_REAP_CHILD |
 			     G_SPAWN_SEARCH_PATH);
 	guint i;
+#endif
 
 	g_assert (config);
 	g_assert (argc);
@@ -1070,11 +1077,6 @@ cc_oci_vm_connect (struct cc_oci_config *config,
 	// FIXME: replace with proper connection string once networking details available.
 #if 0
 	args[1] = g_strdup_printf (ip_address);
-#else
-	g_critical ("not implemented yet");
-	ret = false;
-	goto out;
-#endif
 
 	/* append argv to the end of args */
 	if (argc) {
@@ -1131,6 +1133,10 @@ cc_oci_vm_connect (struct cc_oci_config *config,
 	}
 
 	ret = true;
+#else
+	g_critical ("not implemented yet");
+	ret = false;
+#endif
 
 out:
 	if (args) {

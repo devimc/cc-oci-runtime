@@ -43,9 +43,6 @@ static gboolean show_version;
 static gboolean show_help;
 static gboolean systemd_cgroup;
 
-/** If \c true, enable \c g_debug() output */
-gboolean enable_debug;
-
 /** Path to create state under */
 static gchar *root_dir;
 
@@ -62,7 +59,7 @@ static GOptionEntry options_global[] =
 	},
 	{
 		"debug", 'd', G_OPTION_FLAG_NONE,
-		G_OPTION_ARG_NONE, &enable_debug,
+		G_OPTION_ARG_NONE, &cc_log_options.enable_debug,
 		"enable debug output",
 		NULL
 	},
@@ -71,6 +68,13 @@ static GOptionEntry options_global[] =
 		G_OPTION_ARG_STRING,
 		&cc_log_options.global_logfile,
 		"enable global logging",
+		NULL
+	},
+	{
+		"hypervisor-log-dir", 0, G_OPTION_FLAG_NONE,
+		G_OPTION_ARG_STRING,
+		&cc_log_options.hypervisor_log_dir,
+		"specify directory path to output hypervisor log",
 		NULL
 	},
 	{
@@ -232,28 +236,14 @@ out:
  * Setup logging.
  *
  * \param options \ref cc_log_options.
- * \param config \ref cc_oci_config.
  *
  * \return \c true on success, else \c false.
  */
 static gboolean
-setup_logging (struct cc_log_options *options,
-		struct cc_oci_config *config)
+setup_logging (struct cc_log_options *options)
 {
-	g_assert (options);
-
-	if (! options->global_logfile) {
-		/* FIXME: --global-log is currently always enabled.
-		 *
-		 * For now, always create a global log file since
-		 * containerd doesn't always invoke the runtime with --log
-		 * (which makes debugging awkward).
-		 */
-		options->global_logfile = g_build_path ("/",
-				config->root_dir
-				? config->root_dir
-				: CC_OCI_RUNTIME_DIR_PREFIX,
-				PACKAGE_NAME ".log", NULL);
+	if (! options) {
+		return false;
 	}
 
 	return cc_oci_log_init (options);
@@ -364,7 +354,7 @@ handle_arguments (int argc, char **argv)
 	}
 
 	if (priv_level >= 0 &&
-			! setup_logging (&cc_log_options, &config)) {
+			! setup_logging (&cc_log_options)) {
 		/* Send message to stderr as in case logging is
 		 * completely broken due to failed setup.
 		 */
@@ -374,7 +364,7 @@ handle_arguments (int argc, char **argv)
 		goto out;
 	}
 
-	if (enable_debug) {
+	if (cc_log_options.enable_debug) {
 		/* Record how runtime was invoked in log */
 		gchar *str = g_strjoinv (" ", argv);
 		g_debug ("called as: %s %s", program_name, str);
@@ -420,7 +410,7 @@ main (int argc, char **argv)
 	gboolean ret;
 
 	// FIXME: --debug currently forcibly enabled
-	enable_debug = true;
+	cc_log_options.enable_debug = true;
 
 	ret = handle_arguments (argc, argv);
 
