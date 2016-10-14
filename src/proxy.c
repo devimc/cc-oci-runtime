@@ -539,6 +539,78 @@ out:
 	return ret;
 }
 
+/**
+ * Attach current proxy connection to a
+ * previous registered VM (hello command)
+ *
+ * \param proxy \ref cc_proxy.
+ * \param container_id container id.
+ *
+ * \return \c true on success, else \c false.
+ */
+static gboolean
+cc_proxy_attach (struct cc_proxy *proxy, const char *container_id)
+{
+
+	JsonObject        *obj = NULL;
+	JsonObject        *data = NULL;
+	JsonNode          *root = NULL;
+	JsonGenerator     *generator = NULL;
+	gchar             *msg_to_send = NULL;
+	GString           *msg_received = NULL;
+	gboolean           ret = false;
+
+	/* The name of the command used to initiate communicate
+	 * with the proxy.
+	 */
+	const gchar       *proxy_cmd = "attach";
+
+	if (! (proxy && proxy->socket && container_id)) {
+		return false;
+	}
+
+	obj = json_object_new ();
+	data = json_object_new ();
+
+	json_object_set_string_member (obj, "id", proxy_cmd);
+
+	json_object_set_string_member (data, "containerId",
+			container_id);
+
+	json_object_set_object_member (obj, "data", data);
+
+	root = json_node_new (JSON_NODE_OBJECT);
+	generator = json_generator_new ();
+	json_node_take_object (root, obj);
+
+	json_generator_set_root (generator, root);
+	g_object_set (generator, "pretty", FALSE, NULL);
+
+	msg_to_send = json_generator_to_data (generator, NULL);
+
+	msg_received = g_string_new("");
+
+	if (! cc_proxy_run_cmd(proxy, msg_to_send, msg_received)) {
+		g_critical("failed to run proxy command %s: %s",
+				proxy_cmd,
+				msg_received->str);
+		goto out;
+	}
+
+	ret = true;
+
+	g_debug("msg received: %s", msg_received->str);
+
+out:
+	if (msg_received) {
+		g_string_free(msg_received, true);
+	}
+	if (obj) {
+		json_object_unref (obj);
+	}
+
+	return ret;
+}
 
 /**
  * Connect to \ref CC_OCI_PROXY and wait until it is ready.
@@ -731,4 +803,133 @@ out:
 	}
 
 	return ret;
+}
+
+/**
+ * Request \ref CC_OCI_PROXY to start a new container
+ * using intial worload from \ref cc_oci_config
+ *
+ * \param config
+ *
+ * \return \c true on success, else \c false.
+ */
+gboolean
+cc_proxy_hyper_new_container (struct cc_oci_config *config)
+{
+       JsonObject *newcontainer_payload= NULL;
+       JsonObject *process = NULL;
+       JsonArray *args= NULL;
+       JsonArray *envs= NULL;
+       gchar     **strvp = NULL;
+       gboolean ret = false;
+
+       if (! (config && config->proxy)) {
+               goto out;
+       }
+
+       if (! cc_proxy_connect (config->proxy)) {
+               goto out;
+       }
+       if (! cc_proxy_attach (config->proxy, config->optarg_container_id)) {
+	       goto out;
+       }
+
+       /* json stanza for NEWCONTAINER*/
+       /*
+          {
+                  "id": "container_id",
+                  "rootfs": "??",
+                  "image": "??",
+                  "process": {
+                          "terminal": true,
+                          "stdio": 1,
+                          "stderr": 2,
+                          "args": [
+                          "config.process.args0",
+                          "config.process.args..",
+                  ],
+                  "envs": [
+                  {
+                          "env": "config.process.env_var_name",
+                          "value": "var_value"
+                  }
+                  ],
+                  "workdir": "config.process.cwd"
+                  },
+                  "restartPolicy": "never", ??
+                  "initialize": false ??
+          }
+        * */
+
+       newcontainer_payload = json_object_new ();
+       process  = json_object_new ();
+       args     = json_array_new ();
+       envs     = json_array_new ();
+
+       json_object_set_string_member (newcontainer_payload, "id", config->optarg_container_id);
+       /*
+        * FIXME ADD rootfs
+       */
+       json_object_set_string_member (newcontainer_payload, "rootfs", "");
+       /*
+        * FIXME ADD image
+       */
+       json_object_set_string_member (newcontainer_payload, "image", "");
+
+       /* newcontainer.process */
+       json_object_set_boolean_member(process, "terminal", true);
+
+       /* FIXME how to handle IO streams id's  ?*/
+       json_object_set_int_member (process, "stdio", 1);
+       json_object_set_int_member (process, "stderr", 2);
+
+       /* initial workload from config */
+       strvp = config->oci.process.args;
+       while (*strvp != NULL) {
+               json_array_add_string_element (args, *strvp);
+               strvp++;
+       }
+
+#if 0
+       /* FIXME: Split config.process.env to get key values (KEY=VALUE) */
+       strvp = config->oci.process.env;
+       while (*strvp != NULL) {
+		var, val = split (strvp, = );
+		json_array_add_object_element (envs, env_var);
+		strvp++;
+       }
+#else
+	JsonObject *env_var = json_object_new ();
+	json_object_set_string_member (env_var, "env", "PATH");
+	json_object_set_string_member (env_var, "value", "/bin:/usr/bin");
+	json_array_add_object_element (envs, env_var);
+#endif
+
+	// FIXME use config cwd
+       json_object_set_string_member (process, "workdir", "/");
+
+	// FIXME match with config or find a good default
+       json_object_set_string_member (newcontainer_payload, "restartPolicy", "never");
+
+	// FIXME match with config or find a good default
+       json_object_set_boolean_member (newcontainer_payload, "initialize", false);
+
+       json_object_set_array_member (process, "args", args);
+       json_object_set_array_member (process, "envs", envs);
+       json_object_set_object_member (newcontainer_payload, "process", process);
+
+       if (! cc_proxy_run_hyper_cmd (config, "newcontainer", newcontainer_payload)) {
+               g_critical("failed to run pod create");
+               goto out;
+       }
+
+       ret = true;
+out:
+       if (newcontainer_payload) {
+               json_object_unref (newcontainer_payload);
+       }
+
+       cc_proxy_disconnect (config->proxy);
+
+       return ret;
 }
