@@ -32,6 +32,7 @@
 #include <inttypes.h>
 #include <getopt.h>
 #include <stdbool.h>
+#include <limits.h>
 
 #include "log.h"
 #include "shim.h"
@@ -429,6 +430,24 @@ handle_proxy_output(struct cc_shim *shim)
 	free(buf);
 }
 
+void handle_proxy_ctl(struct cc_shim *shim)
+{
+	char buf[LINE_MAX];
+	ssize_t ret;
+
+	if (! shim) {
+		return;
+	}
+
+	ret = read(shim->proxy_sock_fd, buf, LINE_MAX);
+	if (ret == -1) {
+		shim_warning("Error reading from the proxy ctl socket: %s\n", strerror(errno));
+	}
+
+	//TODO: Parse the json and log error responses explicitly
+	shim_debug("Proxy response:%s\n", buf);
+}
+
 long long
 parse_numeric_option(char *input) {
 	char       *endptr;
@@ -588,6 +607,8 @@ main(int argc, char **argv)
 	add_pollfd(poll_fds, &nfds, proxy_sockfd, POLLIN | POLLPRI);
 #endif
 
+	add_pollfd(poll_fds, &nfds, shim.proxy_sock_fd, POLLIN | POLLPRI);
+
 	/*	0 =>signal_pipe_fd[0]
 		1 =>stdin
 		2 =>proxy_io_fd
@@ -617,6 +638,7 @@ main(int argc, char **argv)
 
 		// check for proxy sockfd
 		if (poll_fds[2].revents != 0) {
+			handle_proxy_ctl(&shim);
 		}
 	}
 
