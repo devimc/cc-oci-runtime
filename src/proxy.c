@@ -752,6 +752,79 @@ out:
 }
 
 /**
+ * Request \ref CC_OCI_PROXY to allocate IO stream
+ * sequence for use with a process to be executed, 
+ * IO stream numebers would be handled by \ref CC_OCI_SHIM.
+ *
+ * \note Must already be connected to the proxy.
+ *
+ * \param config \ref cc_oci_config.
+ *
+ * \return \c true on success, else \c false.
+ */
+gboolean
+cc_proxy_allocate_io (struct cc_oci_config *config)
+{
+	JsonObject        *obj = NULL;
+	JsonObject        *data = NULL;
+	JsonNode          *root = NULL;
+	JsonGenerator     *generator = NULL;
+	gchar             *msg_to_send = NULL;
+	GString           *msg_received = NULL;
+	gboolean           ret = false;
+
+	const gchar       *proxy_cmd = "allocateIO";
+	/* allocate 2 streams, stdio and stderr */
+	int n_streams = 2;
+
+	if (! (config && config->proxy)) {
+		return false;
+	}
+
+	obj = json_object_new ();
+	data = json_object_new ();
+
+	json_object_set_string_member (obj, "id", proxy_cmd);
+
+	json_object_set_int_member (data, "nStreams",
+		n_streams);
+
+	json_object_set_object_member (obj, "data", data);
+
+	root = json_node_new (JSON_NODE_OBJECT);
+	generator = json_generator_new ();
+	json_node_take_object (root, obj);
+
+	json_generator_set_root (generator, root);
+	g_object_set (generator, "pretty", FALSE, NULL);
+
+	msg_to_send = json_generator_to_data (generator, NULL);
+
+	msg_received = g_string_new("");
+
+	if (! cc_proxy_run_cmd(config->proxy, msg_to_send, msg_received)) {
+		g_critical("failed to run proxy command %s: %s",
+				proxy_cmd,
+				msg_received->str);
+		goto out;
+	}
+
+	ret = true;
+
+	g_debug("msg received: %s", msg_received->str);
+
+out:
+	if (msg_received) {
+		g_string_free(msg_received, true);
+	}
+	if (obj) {
+		json_object_unref (obj);
+	}
+
+	return ret;
+}
+
+/**
  * Request \ref CC_OCI_PROXY create a new POD (container group).
  *
  * \note Must already be connected to the proxy.

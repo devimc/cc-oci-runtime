@@ -223,6 +223,10 @@ struct oci_cfg_process {
 	/** Set to \c true if the container has an associated terminal. */
 	gboolean             terminal;
 
+	/** Stream IO ids allocated by \c cc_proxy_allocate_io */
+	gint                 stdio_stream;
+	gint                 stderr_stream;
+
 	struct oci_cfg_user  user;
 };
 

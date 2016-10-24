@@ -1733,6 +1733,8 @@ cc_oci_process_to_json(const struct oci_cfg_process *process)
 	json_object_set_string_member (json_process, "cwd", process->cwd);
 	json_object_set_boolean_member (json_process, "terminal",
 			process->terminal);
+	json_object_set_int_member (json_process, "stdio_stream", process->stdio_stream);
+	json_object_set_int_member (json_process, "stderr_stream", process->stderr_stream);
 	json_object_set_object_member (json_process, "user", user);
 	json_object_set_array_member (json_process, "args", args);
 	json_object_set_array_member (json_process, "envs", envs);
