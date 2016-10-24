@@ -33,6 +33,7 @@
 #include "semver.h"
 #include "oci-config.h"
 #include "networking.h"
+#include "proxy.h"
 
 /*!
  * Free all resources associated with \p h hook object.
@@ -106,7 +107,32 @@ cc_oci_config_file_path (const gchar *bundle_path)
 }
 
 /*!
- * Free all resources associated with the static \p config object.
+ * Create a new \ref cc_oci_config object.
+ *
+ * \return Newly-allocated \ref cc_oci_config on success,
+ * else \c NULL.
+ */
+struct cc_oci_config *
+cc_oci_config_create (void)
+{
+	struct cc_oci_config *config;
+
+	config = g_malloc0 (sizeof (struct cc_oci_config));
+	if (! config) {
+		return NULL;
+	}
+
+	config->proxy = g_malloc0 (sizeof (struct cc_proxy));
+	if (! config->proxy) {
+		g_free (config);
+		return NULL;
+	}
+
+	return config;
+}
+
+/*!
+ * Free all resources associated with the \p config object.
  *
  * \param config \ref cc_oci_config.
  */
@@ -169,6 +195,10 @@ cc_oci_config_free (struct cc_oci_config *config)
 		g_slist_free_full(config->net.interfaces,
                 (GDestroyNotify)cc_oci_net_interface_free);
 	}
+
+	cc_proxy_free (config->proxy);
+
+	g_free (config);
 }
 
 /*!

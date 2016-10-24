@@ -40,6 +40,7 @@
 #include <gio/gunixsocketaddress.h>
 #include <json-glib/json-glib.h>
 #include <json-glib/json-gobject.h>
+#include <sys/stat.h>
 
 #include "common.h"
 #include "oci.h"
@@ -53,6 +54,7 @@
 #include "runtime.h"
 #include "spec_handler.h"
 #include "command.h"
+#include "proxy.h"
 
 extern struct start_data start_data;
 
@@ -459,7 +461,8 @@ cc_oci_attach (struct cc_oci_config *config,
 	}
 
 	if (! g_socket_connect(socket, src_address, NULL, &error)) {
-		g_critical("failed to connect socket");
+		g_critical("failed to connect to hypervisor console socket :%s",
+				state->console);
 		if (error) {
 			g_critical("error: %s", error->message);
 			g_error_free (error);
@@ -902,9 +905,6 @@ cc_oci_create (struct cc_oci_config *config)
 		return true;
 	}
 
-	/* start VM is a stopped state (containerd requires a
-	 * valid pid in the pidfile after a successful "create").
-	 */
 	if (! cc_oci_vm_launch (config)) {
 		g_critical ("failed to launch VM");
 		goto out;
@@ -990,7 +990,8 @@ handle_process_socket (struct process_watcher_data *data)
 	ret = g_socket_connect(data->socket, data->src_address,
 			NULL, &error);
 	if (! ret) {
-		g_critical("failed to connect to socket: %s",
+		g_critical("failed to connect to hypervisor process socket %s: %s",
+				path,
 				error->message);
 		g_error_free (error);
 		goto fail3;
@@ -1039,34 +1040,14 @@ fail1:
  * \param data \ref process_watcher_data.
  */
 static void
-watcher_runtime_dir (GFileMonitor            *monitor,
+cc_oci_procsock_monitor_callback(
+		GFileMonitor                 *monitor,
 		GFile                        *file,
 		GFile                        *other_file,
 		GFileMonitorEvent             event_type,
 		struct process_watcher_data  *data)
 {
-	g_autofree gchar  *path = NULL;
-	g_autofree gchar  *name = NULL;
-
-	(void)other_file;
-
 	g_assert (data);
-
-	if (event_type != G_FILE_MONITOR_EVENT_CHANGES_DONE_HINT) {
-		return;
-	}
-
-	path = g_file_get_path (file);
-	if (! path) {
-		return;
-	}
-
-	name = g_path_get_basename (path);
-
-	/* ignore non-matching files */
-	if (g_strcmp0 (CC_OCI_PROCESS_SOCKET, name)) {
-		return;
-	}
 
 	/* CC_OCI_PROCESS_SOCKET has now been created, so delete the
 	 * monitor.
@@ -1093,13 +1074,13 @@ cc_oci_start (struct cc_oci_config *config,
 		struct oci_state *state)
 {
 	gboolean       ret = false;
-	GPid           pid;
 	GFileMonitor  *monitor = NULL;
 	GFile         *file = NULL;
 	GError        *error = NULL;
 	gboolean       wait = false;
 	struct process_watcher_data data = { 0 };
 	gchar         *config_file = NULL;
+	struct stat    st;
 
 	if (! config || ! state) {
 		return false;
@@ -1134,8 +1115,6 @@ cc_oci_start (struct cc_oci_config *config,
 		start_data.bundle = NULL;
 	}
 
-	pid = config->state.workload_pid;
-
 	/* XXX: If running stand-alone, wait for the hypervisor to
 	 * finish. But if running under containerd, don't wait.
 	 *
@@ -1157,54 +1136,41 @@ cc_oci_start (struct cc_oci_config *config,
 			return false;
 		}
 
-		file = g_file_new_for_path (config->state.runtime_path);
-		if (! file) {
-			g_main_loop_unref (data.loop);
-			return false;
+		/* Create a file monitor if CC_OCI_PROCESS_SOCKET does not exist */
+		if (stat(config->state.procsock_path, &st)) {
+			file = g_file_new_for_path (config->state.procsock_path);
+			if (! file) {
+				g_main_loop_unref (data.loop);
+				return false;
+			}
+
+			/* create inotify watch on runtime directory.
+			 */
+			monitor = g_file_monitor(file, G_FILE_MONITOR_NONE, NULL, &error);
+			if (! monitor) {
+				g_critical ("failed to monitor %s: %s",
+						g_file_get_path (file),
+						error->message);
+				g_error_free (error);
+				g_object_unref (file);
+				g_main_loop_unref (data.loop);
+
+				return false;
+			}
+
+			g_signal_connect (monitor, "changed",
+					G_CALLBACK (cc_oci_procsock_monitor_callback),
+					&data);
+		} else {
+			/* procsock exists, connect to it */
+			if (! handle_process_socket (&data)) {
+				data.failed = true;
+				g_critical ("failed to handle process socket");
+			}
 		}
-
-		/* create inotify watch on runtime directory
-		 * (crucially before the VM is resumed).
-		 */
-		monitor = g_file_monitor_directory (file,
-				G_FILE_MONITOR_WATCH_MOVES,
-				NULL, &error);
-		if (! monitor) {
-			g_critical ("failed to monitor %s: %s",
-					g_file_get_path (file),
-					error->message);
-			g_error_free (error);
-			g_object_unref (file);
-			g_main_loop_unref (data.loop);
-
-			return false;
-		}
-
-		g_signal_connect (monitor, "changed",
-				G_CALLBACK (watcher_runtime_dir),
-				&data);
 	}
 
-	/* "create" left the VM in a stopped state, so now let it
-	 * continue.
-	 *
-	 * This will result in \ref CC_OCI_PROCESS_SOCKET being
-	 * created, however there will be a delay. Since we wish to
-	 * connect to this socket, the approach is to use an inotify
-	 * watch to wait for the socket file to exist, then connect to
-	 * it.
-	 */
-	if (kill (pid, SIGCONT) < 0) {
-		g_critical ("failed to start VM %s: %s",
-				config->optarg_container_id,
-				strerror (errno));
-		return false;
-	}
-
-	g_debug ("activated VM %s (pid %d)",
-			config->optarg_container_id,
-			(int)pid);
-
+	// FIXME: start pod and run workload, then set this status.
 	/* Now the VM is running */
 	config->state.status = OCI_STATUS_RUNNING;
 
@@ -1547,30 +1513,40 @@ cc_oci_list_vm (const struct oci_state *state,
 static struct oci_state *
 cc_oci_vm_get_state (const gchar *name, const char *root_dir)
 {
-	struct cc_oci_config  config = { { 0 } };
+	struct cc_oci_config  *config = NULL;
 	struct oci_state      *state = NULL;
 	gchar                 *config_file = NULL;
 
-	g_assert (name);
+	if (! (name && root_dir)) {
+		return NULL;
+	}
 
-	config.optarg_container_id = name;
+	config = cc_oci_config_create ();
+	if (! config) {
+		return NULL;
+	}
+
+	config->optarg_container_id = name;
 
 	if (root_dir) {
-		config.root_dir = g_strdup (root_dir);
+		config->root_dir = g_strdup (root_dir);
 	}
 
-	if (! cc_oci_runtime_path_get (&config)) {
-		return NULL;
+	if (! cc_oci_runtime_path_get (config)) {
+		goto out;
 	}
 
-	if (! cc_oci_state_file_get (&config)) {
-		return NULL;
+	if (! cc_oci_state_file_get (config)) {
+		goto out;
 	}
 
-	state = cc_oci_state_file_read (config.state.state_file_path);
+	state = cc_oci_state_file_read (config->state.state_file_path);
 
+out:
 	g_free_if_set (config_file);
-	cc_oci_config_free (&config);
+	if (config) {
+		cc_oci_config_free (config);
+	}
 
 	return state;
 }
@@ -1831,6 +1807,12 @@ cc_oci_config_update (struct cc_oci_config *config,
 	if (state->vm) {
 		config->vm = state->vm;
 		state->vm = NULL;
+	}
+
+	if (state->proxy) {
+		cc_proxy_free (config->proxy);
+		config->proxy = state->proxy;
+		state->proxy = NULL;
 	}
 
 	if (state->procsock_path) {

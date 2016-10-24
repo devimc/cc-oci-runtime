@@ -26,6 +26,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <stdbool.h>
+#include <syslog.h>
 
 #include <glib.h>
 #include <glib/gprintf.h>
@@ -536,6 +537,90 @@ cc_oci_fd_set_cloexec (int fd)
 	}
 
 	return true;
+}
+
+/**
+ * Determine if the specified file descriptor is valid.
+ *
+ * \param fd File desciptor to check.
+ *
+ * \return \c true if \p fd is valid, else \c false.
+ */
+gboolean
+cc_oci_fd_valid (int fd)
+{
+	int flags;
+
+	if (fd < 0) {
+		return false;
+	}
+
+	errno = 0;
+
+	flags = fcntl (fd, F_GETFL);
+
+	if (flags <= 0 || errno == EBADF) {
+		return false;
+	}
+
+	return true;
+}
+
+/* Set standard streams to /dev/null if not already open.
+ *
+ * Some environments the runtime is launched in don't provide
+ * standard streams (in fact fds[0-2] may be closed).
+ *
+ * To simplify later file descriptor handling, ensure that
+ * the standard streams are either valid, or set to /dev/null.
+ *
+ * \note If this function fails, it logs to syslog since the
+ * standard streams may be unavailable to write to.
+ *
+ * \return \c true on success, else false.
+ */
+gboolean
+cc_oci_set_std_fds (void)
+{
+	gboolean     ret = false;
+	int          devnull = -1;
+	int          fd = -1;
+	int          fds[] = {STDIN_FILENO,
+			      STDOUT_FILENO,
+			      STDERR_FILENO};
+	const gchar  path[] = "/dev/null";
+
+	for (fd = 0;
+	     fd < (int)(sizeof (fds)/sizeof (fds[0]));
+	     fd++) {
+		if (! cc_oci_fd_valid (fd)) {
+			int ret;
+
+			if (devnull == -1) {
+				devnull = open (path,
+						O_RDWR | O_NOCTTY);
+				if (devnull == -1) {
+					syslog (LOG_ERR, "ERROR: unable to open %s: %s", path, strerror (errno));
+					goto out;
+				}
+			}
+
+			ret = dup2 (devnull, fd);
+			if (ret < 0) {
+				syslog (LOG_ERR, "ERROR: failed to dup %s to fd %d: %s", path, fd, strerror (errno));
+				goto out;
+			}
+		}
+	}
+
+	ret = true;
+
+out:
+	if (devnull != -1) {
+		close (devnull);
+	}
+
+	return ret;
 }
 
 /**

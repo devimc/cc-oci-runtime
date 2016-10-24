@@ -29,6 +29,7 @@
 #include "../src/logging.h"
 #include "../src/hypervisor.h"
 #include "../src/oci.h"
+#include "../src/proxy.h"
 
 gchar *
 cc_oci_vm_args_file_path (const struct cc_oci_config *config);
@@ -109,7 +110,7 @@ check_full_expansion (struct cc_oci_config *config,
 
 START_TEST(test_cc_oci_vm_args_file_path) {
 	gboolean ret;
-	struct cc_oci_config config = { { 0 } };
+	struct cc_oci_config *config = NULL;
 	gchar *tmpdir;
 	gchar *args_file;
 
@@ -150,30 +151,33 @@ START_TEST(test_cc_oci_vm_args_file_path) {
 	tmp_defaults_args_file = g_build_path ("/", tmp_defaultsdir,
 			"hypervisor.args", NULL);
 
+	config = cc_oci_config_create ();
+	ck_assert (config);
+
 	/* invalid config specified */
 	ck_assert (! cc_oci_vm_args_file_path (NULL));
 
 	/* no bundle path in config */
-	ck_assert (! cc_oci_vm_args_file_path (&config));
+	ck_assert (! cc_oci_vm_args_file_path (config));
 
-	config.bundle_path = g_strdup (tmpdir);
+	config->bundle_path = g_strdup (tmpdir);
 
 	/* bundle path is now set, but no args file exists there,
 	 * nor in any of the default locations.
 	 */
-	ck_assert (! cc_oci_vm_args_file_path (&config));
+	ck_assert (! cc_oci_vm_args_file_path (config));
 
 	/* switch to valid (but empty) default directories */
 	sysconfdir = tmp_sysconfdir;
 	defaultsdir = tmp_defaultsdir;
 
-	ck_assert (! cc_oci_vm_args_file_path (&config));
+	ck_assert (! cc_oci_vm_args_file_path (config));
 
 	/* create an empty bundle_path file */
 	ret = g_file_set_contents (args_file, "", -1, NULL);
 	ck_assert (ret);
 
-	path = cc_oci_vm_args_file_path (&config);
+	path = cc_oci_vm_args_file_path (config);
 	ck_assert (path);
 	ck_assert (! g_strcmp0 (path, args_file));
 	g_free (path);
@@ -185,7 +189,7 @@ START_TEST(test_cc_oci_vm_args_file_path) {
 	ret = g_file_set_contents (tmp_sysconf_args_file, "", -1, NULL);
 	ck_assert (ret);
 
-	path = cc_oci_vm_args_file_path (&config);
+	path = cc_oci_vm_args_file_path (config);
 	ck_assert (path);
 
 	ck_assert (! g_strcmp0 (path, tmp_sysconf_args_file));
@@ -198,7 +202,7 @@ START_TEST(test_cc_oci_vm_args_file_path) {
 	ret = g_file_set_contents (tmp_defaults_args_file, "", -1, NULL);
 	ck_assert (ret);
 
-	path = cc_oci_vm_args_file_path (&config);
+	path = cc_oci_vm_args_file_path (config);
 	ck_assert (path);
 	ck_assert (! g_strcmp0 (path, tmp_defaults_args_file));
 	g_free (path);
@@ -219,7 +223,7 @@ START_TEST(test_cc_oci_vm_args_file_path) {
 	g_free (tmp_sysconf_args_file);
 	g_free (tmp_defaults_args_file);
 
-	cc_oci_config_free (&config);
+	cc_oci_config_free (config);
 } END_TEST
 
 START_TEST(test_cc_oci_expand_cmdline) {
@@ -231,10 +235,13 @@ START_TEST(test_cc_oci_expand_cmdline) {
 	gchar *image_size = g_strdup_printf ("%lu",
 			(unsigned long int)sizeof(image_contents)-1);
 	gchar *shell;
+	struct cc_proxy *proxy = NULL;
 	g_autofree gchar *cc_stdin = NULL;
 	g_autofree gchar *cc_stdout = NULL;
+	g_autofree gchar *proxy_ctl_socket_path = NULL;
+	g_autofree gchar *proxy_tty_socket_path = NULL;
 
-	struct cc_oci_config config = { { 0 } };
+	struct cc_oci_config *config = NULL;
 
 	tmpdir = g_dir_make_tmp (NULL, NULL);
 	ck_assert (tmpdir);
@@ -251,72 +258,103 @@ START_TEST(test_cc_oci_expand_cmdline) {
 	/* no config */
 	ck_assert (! cc_oci_expand_cmdline (NULL, args));
 
-	/* no config.vm */
-	ck_assert (! cc_oci_expand_cmdline (&config, args));
+	config = cc_oci_config_create ();
+	ck_assert (config);
+	ck_assert (config->proxy);
 
-	config.vm = g_new0 (struct cc_oci_vm_cfg, 1);
-	ck_assert (config.vm);
+	/* no config->vm */
+	ck_assert (! cc_oci_expand_cmdline (config, args));
+
+	config->vm = g_new0 (struct cc_oci_vm_cfg, 1);
+	ck_assert (config->vm);
 
 	path = g_build_path ("/", tmpdir, "image", NULL);
 	ck_assert (path);
-	g_strlcpy (config.vm->image_path, path,
-			sizeof (config.vm->image_path));
+	g_strlcpy (config->vm->image_path, path,
+			sizeof (config->vm->image_path));
 	g_free (path);
 
 	/* image_path is ENOENT */
-	ck_assert (! cc_oci_expand_cmdline (&config, args));
+	ck_assert (! cc_oci_expand_cmdline (config, args));
 
 	/* create image_path */
-	ret = g_file_set_contents (config.vm->image_path,
+	ret = g_file_set_contents (config->vm->image_path,
 			image_contents, -1, NULL);
 	ck_assert (ret);
 
 	/* no kernel path */
-	ck_assert (! cc_oci_expand_cmdline (&config, args));
+	ck_assert (! cc_oci_expand_cmdline (config, args));
 
 	path = g_build_path ("/", tmpdir, "vmlinux", NULL);
 	ck_assert (path);
-	g_strlcpy (config.vm->kernel_path, path,
-			sizeof (config.vm->kernel_path));
+	g_strlcpy (config->vm->kernel_path, path,
+			sizeof (config->vm->kernel_path));
 	g_free (path);
 
 	/* kernel_path is ENOENT */
-	ck_assert (! cc_oci_expand_cmdline (&config, args));
+	ck_assert (! cc_oci_expand_cmdline (config, args));
 
 	/* create kernel_path */
-	ret = g_file_set_contents (config.vm->kernel_path, "", -1, NULL);
+	ret = g_file_set_contents (config->vm->kernel_path, "", -1, NULL);
 	ck_assert (ret);
 
 	/* no root.path */
-	ck_assert (! cc_oci_expand_cmdline (&config, args));
+	ck_assert (! cc_oci_expand_cmdline (config, args));
 
 	path = g_build_path ("/", tmpdir, "workload", NULL);
 	ck_assert (path);
-	g_strlcpy (config.oci.root.path, path,
-			sizeof (config.oci.root.path));
+	g_strlcpy (config->oci.root.path, path,
+			sizeof (config->oci.root.path));
 	g_free (path);
 
-	ck_assert (! g_mkdir (config.oci.root.path, 0750));
+	ck_assert (! g_mkdir (config->oci.root.path, 0750));
 
-	g_strlcpy (config.state.comms_path, "comms-path",
-			sizeof (config.state.comms_path));
+	g_strlcpy (config->state.comms_path, "comms-path",
+			sizeof (config->state.comms_path));
+	g_strlcpy (config->state.runtime_path, "runtime-path",
+			sizeof (config->state.runtime_path));
 
-	ck_assert (! config.console);
-	ck_assert (! config.bundle_path);
+	ck_assert (! config->console);
+	ck_assert (! config->bundle_path);
 
-	ck_assert (! cc_oci_expand_cmdline (&config, args));
+	ck_assert (! cc_oci_expand_cmdline (config, args));
 
-	config.bundle_path = g_strdup (tmpdir);
-	ck_assert (cc_oci_expand_cmdline (&config, args));
+	ck_assert (! config->console);
+	ck_assert (! config->bundle_path);
+	ck_assert (config->proxy);
 
-	cc_stdin = g_build_path ("/", config.bundle_path,
+	config->bundle_path = g_strdup (tmpdir);
+	ck_assert (cc_oci_expand_cmdline (config, args));
+
+	cc_stdin = g_build_path ("/", config->bundle_path,
 			"cc-std.in", NULL);
-	cc_stdout = g_build_path ("/", config.bundle_path,
+	cc_stdout = g_build_path ("/", config->bundle_path,
 			"cc-std.out", NULL);
 
 	/* console should have been set */
-	ck_assert (config.console);
-	g_free (config.console);
+	ck_assert (config->console);
+	g_free (config->console);
+
+	/* proxy details should have been set */
+	ck_assert (config->proxy);
+	proxy = config->proxy;
+	ck_assert (proxy->agent_ctl_socket);
+	ck_assert (proxy->agent_tty_socket);
+
+	proxy_ctl_socket_path = g_build_path ("/",
+			config->state.runtime_path,
+			"ga-ctl.sock", NULL);
+	ck_assert (! g_strcmp0 (proxy->agent_ctl_socket, proxy_ctl_socket_path));
+
+	proxy_tty_socket_path = g_build_path ("/",
+			config->state.runtime_path,
+			"ga-tty.sock", NULL);
+	ck_assert (! g_strcmp0 (proxy->agent_tty_socket, proxy_tty_socket_path));
+
+	/* clean up ready for another call */
+	cc_proxy_free (config->proxy);
+	config->proxy = g_malloc0 (sizeof (struct cc_proxy));
+	ck_assert (config->proxy);
 
 	/* ensure no expansion took place */
 	ck_assert (! g_strcmp0 (args[0], ""));
@@ -330,10 +368,10 @@ START_TEST(test_cc_oci_expand_cmdline) {
 	args[1] = g_strdup ("@@@@@@@@@@@");
 	args[2] = NULL;
 
-	config.console = g_strdup ("console device");
-	config.vm->kernel_params = g_strdup ("param1=foo param2=bar");
-	ck_assert (cc_oci_expand_cmdline (&config, args));
-	ck_assert (! g_strcmp0 (config.console, "console device"));
+	config->console = g_strdup ("console device");
+	config->vm->kernel_params = g_strdup ("param1=foo param2=bar");
+	ck_assert (cc_oci_expand_cmdline (config, args));
+	ck_assert (! g_strcmp0 (config->console, "console device"));
 
 	/* ensure no expansion took place */
 	ck_assert (! g_strcmp0 (args[0], "@foo@bar@baz"));
@@ -354,8 +392,13 @@ START_TEST(test_cc_oci_expand_cmdline) {
 	args[8] = g_strdup ("@UUID@");
 	args[9] = NULL;
 
-	ck_assert (cc_oci_expand_cmdline (&config, args));
-	ck_assert (check_full_expansion (&config,
+	/* clean up ready for another call */
+	cc_proxy_free (config->proxy);
+	config->proxy = g_malloc0 (sizeof (struct cc_proxy));
+	ck_assert (config->proxy);
+
+	ck_assert (cc_oci_expand_cmdline (config, args));
+	ck_assert (check_full_expansion (config,
 				(const gchar **)args, image_size));
 	g_strfreev (args);
 
@@ -368,7 +411,12 @@ START_TEST(test_cc_oci_expand_cmdline) {
 	args[0] = g_strdup ("sh");
 	args[1] = NULL;
 
-	ck_assert (cc_oci_expand_cmdline (&config, args));
+	/* clean up ready for another call */
+	cc_proxy_free (config->proxy);
+	config->proxy = g_malloc0 (sizeof (struct cc_proxy));
+	ck_assert (config->proxy);
+
+	ck_assert (cc_oci_expand_cmdline (config, args));
 	ck_assert (! g_strcmp0 (args[0], shell));
 	ck_assert (! args[1]);
 
@@ -376,18 +424,23 @@ START_TEST(test_cc_oci_expand_cmdline) {
 	/* test with an already specified absolute path */
 	args[0] = g_strdup (shell);
 
-	ck_assert (cc_oci_expand_cmdline (&config, args));
+	/* clean up ready for another call */
+	cc_proxy_free (config->proxy);
+	config->proxy = g_malloc0 (sizeof (struct cc_proxy));
+	ck_assert (config->proxy);
+
+	ck_assert (cc_oci_expand_cmdline (config, args));
 	ck_assert (! g_strcmp0 (args[0], shell));
 
 	g_free (shell);
 	g_strfreev (args);
 
 	/* clean up */
-	ck_assert (! g_remove (config.vm->image_path));
-	ck_assert (! g_remove (config.vm->kernel_path));
-	ck_assert (! g_remove (config.oci.root.path));
+	ck_assert (! g_remove (config->vm->image_path));
+	ck_assert (! g_remove (config->vm->kernel_path));
+	ck_assert (! g_remove (config->oci.root.path));
 
-	if (! config.oci.process.terminal) {
+	if (! config->oci.process.terminal) {
 		ck_assert (! g_remove (cc_stdin));
 		ck_assert (! g_remove (cc_stdout));
 	}
@@ -396,7 +449,7 @@ START_TEST(test_cc_oci_expand_cmdline) {
 	g_free (tmpdir);
 
 	g_free (image_size);
-	cc_oci_config_free (&config);
+	cc_oci_config_free (config);
 } END_TEST
 
 START_TEST(test_cc_oci_vm_args_get) {
@@ -404,7 +457,7 @@ START_TEST(test_cc_oci_vm_args_get) {
 	gchar *path;
 	gchar **args = NULL;
 	gchar *tmpdir;
-	struct cc_oci_config config = { { 0 } };
+	struct cc_oci_config *config = NULL;
 	gchar *args_file;
 	gchar  image_contents[] = "hello world";
 	gchar *image_size = g_strdup_printf ("%lu",
@@ -431,93 +484,101 @@ START_TEST(test_cc_oci_vm_args_get) {
 			"hypervisor.args", NULL);
 	ck_assert (args_file);
 
+	config = cc_oci_config_create ();
+	ck_assert (config);
+
 	ck_assert (! cc_oci_vm_args_get (NULL, NULL, NULL));
 
 	ck_assert (! cc_oci_vm_args_get (NULL, &args, NULL));
-	ck_assert (! cc_oci_vm_args_get (&config, NULL, NULL));
+	ck_assert (! cc_oci_vm_args_get (config, NULL, NULL));
 
 	/* no bundle_path */
-	ck_assert (! cc_oci_vm_args_get (&config, &args, NULL));
+	ck_assert (! cc_oci_vm_args_get (config, &args, NULL));
 
-	config.bundle_path = g_strdup (tmpdir);
+	config->bundle_path = g_strdup (tmpdir);
 
-	cc_stdin = g_build_path ("/", config.bundle_path,
+	cc_stdin = g_build_path ("/", config->bundle_path,
 			"cc-std.in", NULL);
-	cc_stdout = g_build_path ("/", config.bundle_path,
+	cc_stdout = g_build_path ("/", config->bundle_path,
 			"cc-std.out", NULL);
 
-	/* no config.vm */
-	ck_assert (! cc_oci_vm_args_get (&config, &args, NULL));
+	/* no config->vm */
+	ck_assert (! cc_oci_vm_args_get (config, &args, NULL));
 
-	config.vm = g_new0 (struct cc_oci_vm_cfg, 1);
-	ck_assert (config.vm);
+	config->vm = g_new0 (struct cc_oci_vm_cfg, 1);
+	ck_assert (config->vm);
 
-	config.vm->kernel_params = g_strdup ("param1=foo param2=bar");
-	g_strlcpy (config.state.comms_path, "comms-path",
-			sizeof (config.state.comms_path));
+	config->vm->kernel_params = g_strdup ("param1=foo param2=bar");
+	g_strlcpy (config->state.comms_path, "comms-path",
+			sizeof (config->state.comms_path));
 
 	path = g_build_path ("/", tmpdir, "image", NULL);
 	ck_assert (path);
-	g_strlcpy (config.vm->image_path, path,
-			sizeof (config.vm->image_path));
+	g_strlcpy (config->vm->image_path, path,
+			sizeof (config->vm->image_path));
 	g_free (path);
 
 	/* create image_path */
-	ret = g_file_set_contents (config.vm->image_path,
+	ret = g_file_set_contents (config->vm->image_path,
 			image_contents, -1, NULL);
 	ck_assert (ret);
 
 	/* no kernel path */
-	ck_assert (! cc_oci_expand_cmdline (&config, args));
+	ck_assert (! cc_oci_expand_cmdline (config, args));
 
 	path = g_build_path ("/", tmpdir, "vmlinux", NULL);
 	ck_assert (path);
-	g_strlcpy (config.vm->kernel_path, path,
-			sizeof (config.vm->kernel_path));
+	g_strlcpy (config->vm->kernel_path, path,
+			sizeof (config->vm->kernel_path));
 	g_free (path);
 
 	/* create kernel_path */
-	ret = g_file_set_contents (config.vm->kernel_path, "", -1, NULL);
+	ret = g_file_set_contents (config->vm->kernel_path, "", -1, NULL);
 	ck_assert (ret);
 
 	/* no root.path */
-	ck_assert (! cc_oci_expand_cmdline (&config, args));
+	ck_assert (! cc_oci_expand_cmdline (config, args));
 
 	path = g_build_path ("/", tmpdir, "workload", NULL);
 	ck_assert (path);
-	g_strlcpy (config.oci.root.path, path,
-			sizeof (config.oci.root.path));
+	g_strlcpy (config->oci.root.path, path,
+			sizeof (config->oci.root.path));
 	g_free (path);
 
 	/* create root path */
-	ck_assert (! g_mkdir (config.oci.root.path, 0750));
+	ck_assert (! g_mkdir (config->oci.root.path, 0750));
 
 	/* bundle path is now set, but no args file exists there.
 	 */
-	ck_assert (! cc_oci_vm_args_get (&config, &args, NULL));
+	ck_assert (! cc_oci_vm_args_get (config, &args, NULL));
 
 	/* create an empty bundle_path file */
 	ret = g_file_set_contents (args_file, "", -1, NULL);
 	ck_assert (ret);
 
 	/* an empty string cannot be split into lines */
-	ck_assert (! cc_oci_vm_args_get (&config, &args, NULL));
+	ck_assert (! cc_oci_vm_args_get (config, &args, NULL));
 
 	/* recreate the args file */
 	ret = g_file_set_contents (args_file, "hello # comment\n", -1, NULL);
 	ck_assert (ret);
 
-	ck_assert (cc_oci_vm_args_get (&config, &args, NULL));
+	ck_assert (cc_oci_vm_args_get (config, &args, NULL));
 
 	ck_assert (! g_strcmp0 (args[0], "hello"));
 	ck_assert (! args[1]);
 	g_strfreev (args);
 
+	/* clean up ready for another call */
+	cc_proxy_free (config->proxy);
+	config->proxy = g_malloc0 (sizeof (struct cc_proxy));
+	ck_assert (config->proxy);
+
 	/* recreate the args file */
 	ret = g_file_set_contents (args_file, "hello# comment\n", -1, NULL);
 	ck_assert (ret);
 
-	ck_assert (cc_oci_vm_args_get (&config, &args, NULL));
+	ck_assert (cc_oci_vm_args_get (config, &args, NULL));
 
 	ck_assert (! g_strcmp0 (args[0], "hello# comment"));
 	ck_assert (! args[1]);
@@ -527,7 +588,12 @@ START_TEST(test_cc_oci_vm_args_get) {
 	ret = g_file_set_contents (args_file, "hello\\# comment\n", -1, NULL);
 	ck_assert (ret);
 
-	ck_assert (cc_oci_vm_args_get (&config, &args, NULL));
+	/* clean up ready for another call */
+	cc_proxy_free (config->proxy);
+	config->proxy = g_malloc0 (sizeof (struct cc_proxy));
+	ck_assert (config->proxy);
+
+	ck_assert (cc_oci_vm_args_get (config, &args, NULL));
 
 	ck_assert (! g_strcmp0 (args[0], "hello\\# comment"));
 	ck_assert (! args[1]);
@@ -537,7 +603,12 @@ START_TEST(test_cc_oci_vm_args_get) {
 	ret = g_file_set_contents (args_file, "hello\t # comment\n", -1, NULL);
 	ck_assert (ret);
 
-	ck_assert (cc_oci_vm_args_get (&config, &args, NULL));
+	/* clean up ready for another call */
+	cc_proxy_free (config->proxy);
+	config->proxy = g_malloc0 (sizeof (struct cc_proxy));
+	ck_assert (config->proxy);
+
+	ck_assert (cc_oci_vm_args_get (config, &args, NULL));
 
 	ck_assert (! g_strcmp0 (args[0], "hello"));
 	ck_assert (! args[1]);
@@ -547,7 +618,12 @@ START_TEST(test_cc_oci_vm_args_get) {
 	ret = g_file_set_contents (args_file, "hello#comment\n", -1, NULL);
 	ck_assert (ret);
 
-	ck_assert (cc_oci_vm_args_get (&config, &args, NULL));
+	/* clean up ready for another call */
+	cc_proxy_free (config->proxy);
+	config->proxy = g_malloc0 (sizeof (struct cc_proxy));
+	ck_assert (config->proxy);
+
+	ck_assert (cc_oci_vm_args_get (config, &args, NULL));
 
 	ck_assert (! g_strcmp0 (args[0], "hello#comment"));
 	ck_assert (! args[1]);
@@ -557,7 +633,12 @@ START_TEST(test_cc_oci_vm_args_get) {
 	ret = g_file_set_contents (args_file, "# comment\n", -1, NULL);
 	ck_assert (ret);
 
-	ck_assert (cc_oci_vm_args_get (&config, &args, NULL));
+	/* clean up ready for another call */
+	cc_proxy_free (config->proxy);
+	config->proxy = g_malloc0 (sizeof (struct cc_proxy));
+	ck_assert (config->proxy);
+
+	ck_assert (cc_oci_vm_args_get (config, &args, NULL));
 
 	ck_assert(! args[0]);
 	g_strfreev (args);
@@ -566,7 +647,12 @@ START_TEST(test_cc_oci_vm_args_get) {
 	ret = g_file_set_contents (args_file, "# comment", -1, NULL);
 	ck_assert (ret);
 
-	ck_assert (cc_oci_vm_args_get (&config, &args, NULL));
+	/* clean up ready for another call */
+	cc_proxy_free (config->proxy);
+	config->proxy = g_malloc0 (sizeof (struct cc_proxy));
+	ck_assert (config->proxy);
+
+	ck_assert (cc_oci_vm_args_get (config, &args, NULL));
 
 	ck_assert(! args[0]);
 	g_strfreev (args);
@@ -575,7 +661,12 @@ START_TEST(test_cc_oci_vm_args_get) {
 	ret = g_file_set_contents (args_file, "foo", -1, NULL);
 	ck_assert (ret);
 
-	ck_assert (cc_oci_vm_args_get (&config, &args, NULL));
+	/* clean up ready for another call */
+	cc_proxy_free (config->proxy);
+	config->proxy = g_malloc0 (sizeof (struct cc_proxy));
+	ck_assert (config->proxy);
+
+	ck_assert (cc_oci_vm_args_get (config, &args, NULL));
 
 	ck_assert (! g_strcmp0 (args[0], "foo"));
 	ck_assert (! args[1]);
@@ -588,7 +679,13 @@ START_TEST(test_cc_oci_vm_args_get) {
         ck_assert (ret);
 
         extra_args = g_ptr_array_new ();
-        ck_assert (cc_oci_vm_args_get (&config, &args, extra_args));
+
+	/* clean up ready for another call */
+	cc_proxy_free (config->proxy);
+	config->proxy = g_malloc0 (sizeof (struct cc_proxy));
+	ck_assert (config->proxy);
+
+        ck_assert (cc_oci_vm_args_get (config, &args, extra_args));
 
         ck_assert (! g_strcmp0 (args[0], "hello"));
         ck_assert (! g_strcmp0 (args[1], "world"));
@@ -607,7 +704,13 @@ START_TEST(test_cc_oci_vm_args_get) {
 	extra_args = g_ptr_array_new ();
 	g_ptr_array_add(extra_args, "-device testdevice");
 	g_ptr_array_add(extra_args, "-device testdevice2");
-	ck_assert (cc_oci_vm_args_get (&config, &args, extra_args));
+
+	/* clean up ready for another call */
+	cc_proxy_free (config->proxy);
+	config->proxy = g_malloc0 (sizeof (struct cc_proxy));
+	ck_assert (config->proxy);
+
+	ck_assert (cc_oci_vm_args_get (config, &args, extra_args));
 
 	ck_assert (! g_strcmp0 (args[0], "hello"));
 	ck_assert (! g_strcmp0 (args[1], "world"));
@@ -633,18 +736,23 @@ START_TEST(test_cc_oci_vm_args_get) {
 			-1, NULL);
 	ck_assert (ret);
 
-	ck_assert (cc_oci_vm_args_get (&config, &args, NULL));
-	ck_assert (check_full_expansion (&config, (const gchar **)args,
+	/* clean up ready for another call */
+	cc_proxy_free (config->proxy);
+	config->proxy = g_malloc0 (sizeof (struct cc_proxy));
+	ck_assert (config->proxy);
+
+	ck_assert (cc_oci_vm_args_get (config, &args, NULL));
+	ck_assert (check_full_expansion (config, (const gchar **)args,
 				image_size));
 	g_strfreev (args);
 
 	/* clean up */
 	ck_assert (! g_remove (args_file));
-	ck_assert (! g_remove (config.vm->image_path));
-	ck_assert (! g_remove (config.vm->kernel_path));
-	ck_assert (! g_remove (config.oci.root.path));
+	ck_assert (! g_remove (config->vm->image_path));
+	ck_assert (! g_remove (config->vm->kernel_path));
+	ck_assert (! g_remove (config->oci.root.path));
 
-	if (! config.oci.process.terminal) {
+	if (! config->oci.process.terminal) {
 		ck_assert (! g_remove (cc_stdin));
 		ck_assert (! g_remove (cc_stdout));
 	}
@@ -653,7 +761,7 @@ START_TEST(test_cc_oci_vm_args_get) {
 	g_free (args_file);
 	g_free (tmpdir);
 	g_free (image_size);
-	cc_oci_config_free (&config);
+	cc_oci_config_free (config);
 } END_TEST
 
 Suite* make_hypervisor_suite(void) {
