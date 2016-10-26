@@ -801,7 +801,7 @@ cc_proxy_cmd_allocate_io (struct cc_proxy *proxy, int *proxy_io_fd)
 
 	const gchar       *proxy_cmd = "allocateIO";
 	/* allocate 2 streams, stdio and stderr */
-	int n_streams = 2;
+	int n_streams = IO_STREAMS_NUMBER;
 
 	if (! proxy) {
 		return false;
@@ -1072,6 +1072,12 @@ cc_proxy_hyper_new_container (struct cc_oci_config *config)
 	       goto out;
        }
 
+       if (config->oci.process.stdio_stream < 0  ||
+		       config->oci.process.stderr_stream < 0 ) {
+	       g_critical("invalid io stream number");
+	       goto out;
+       }
+
        /* json stanza for NEWCONTAINER*/
        /*
           {
@@ -1104,22 +1110,26 @@ cc_proxy_hyper_new_container (struct cc_oci_config *config)
        args     = json_array_new ();
        envs     = json_array_new ();
 
-       json_object_set_string_member (newcontainer_payload, "id", config->optarg_container_id);
+       json_object_set_string_member (newcontainer_payload, "id",
+		       config->optarg_container_id);
        /*
         * FIXME ADD rootfs
        */
        json_object_set_string_member (newcontainer_payload, "rootfs", "");
-       /*
-        * FIXME ADD image
-       */
+
        json_object_set_string_member (newcontainer_payload, "image", "");
+       /*json_object_set_string_member (newcontainer_payload, "image",
+		       config->optarg_container_id);
+		       */
 
        /* newcontainer.process */
-       json_object_set_boolean_member(process, "terminal", true);
+       json_object_set_boolean_member(process, "terminal",
+		       config->oci.process.terminal);
 
-       /* FIXME how to handle IO streams id's  ?*/
-       json_object_set_int_member (process, "stdio", 1);
-       json_object_set_int_member (process, "stderr", 2);
+       json_object_set_int_member (process, "stdio",
+		       config->oci.process.stdio_stream);
+       json_object_set_int_member (process, "stderr",
+		       config->oci.process.stderr_stream);
 
        /* initial workload from config */
        strvp = config->oci.process.args;
@@ -1143,21 +1153,25 @@ cc_proxy_hyper_new_container (struct cc_oci_config *config)
 	json_array_add_object_element (envs, env_var);
 #endif
 
-	// FIXME use config cwd
-       json_object_set_string_member (process, "workdir", "/");
+       json_object_set_string_member (process, "workdir",
+		       config->oci.process.cwd);
 
 	// FIXME match with config or find a good default
-       json_object_set_string_member (newcontainer_payload, "restartPolicy", "never");
+       json_object_set_string_member (newcontainer_payload,
+		       "restartPolicy", "never");
 
 	// FIXME match with config or find a good default
-       json_object_set_boolean_member (newcontainer_payload, "initialize", false);
+       json_object_set_boolean_member (newcontainer_payload,
+		       "initialize", false);
 
        json_object_set_array_member (process, "args", args);
        json_object_set_array_member (process, "envs", envs);
-       json_object_set_object_member (newcontainer_payload, "process", process);
+       json_object_set_object_member (newcontainer_payload,
+		       "process", process);
 
-       if (! cc_proxy_run_hyper_cmd (config, "newcontainer", newcontainer_payload)) {
-               g_critical("failed to run pod create");
+       if (! cc_proxy_run_hyper_cmd (config, "newcontainer",
+			       newcontainer_payload)) {
+               g_critical("failed to start new container");
                goto out;
        }
 
