@@ -814,6 +814,9 @@ START_TEST(test_cc_oci_vm_running) {
 
 } END_TEST
 
+	config = cc_oci_config_create ();
+	ck_assert (config);
+
 START_TEST(test_get_user_home_dir) {
 	struct cc_oci_config *config = NULL;
 	gchar *user_home;
@@ -930,6 +933,7 @@ START_TEST(test_cc_oci_kill) {
 		G_SPAWN_STDOUT_TO_DEV_NULL |
 		G_SPAWN_STDERR_TO_DEV_NULL |
 		G_SPAWN_DO_NOT_REAP_CHILD);
+
 
 	config = cc_oci_config_create ();
 	ck_assert (config);

@@ -1038,7 +1038,6 @@ cc_oci_start (struct cc_oci_config *config,
 		}
 	}
 
-
        if (! cc_proxy_hyper_new_container (config)) {
                ret = false;
                goto out;
@@ -1188,6 +1187,11 @@ cc_oci_stop (struct cc_oci_config *config,
 		g_warning ("Cannot delete VM %s (pid %u) - "
 				"not running",
 				state->id, state->pid);
+	}
+
+	/* Allow the proxy to clean up resources */
+	if (! cc_proxy_cmd_bye (config->proxy)) {
+		return false;
 	}
 
 	/* The post-stop hooks are called after the container process is

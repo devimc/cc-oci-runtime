@@ -20,7 +20,10 @@
 
 #include <string.h>
 #include <sys/stat.h>
+<<<<<<< HEAD
+=======
 #include <arpa/inet.h>
+>>>>>>> jodh-intel/wip/hyperstart-launch-cc-shim-and-talk-to-hyperstart
 #include <gio/gunixsocketaddress.h>
 #include "oci.h"
 #include "json.h"
@@ -36,6 +39,8 @@ struct watcher_proxy_data
 	GString     *msg_received;
 };
 
+<<<<<<< HEAD
+=======
 /** Format of a proxy message */
 struct proxy_msg {
 	/** Number of bytes in payload. */
@@ -48,6 +53,7 @@ struct proxy_msg {
 	gchar   *data;
 };
 
+>>>>>>> jodh-intel/wip/hyperstart-launch-cc-shim-and-talk-to-hyperstart
 /**
  * Free resources associated with \p proxy.
  *
@@ -210,6 +216,18 @@ out:
  * \param condition GIOCondition.
  * \param proxy_data struct watcher_proxy_data.
  *
+<<<<<<< HEAD
+ * \return \c false
+ */
+static gboolean
+cc_proxy_read_msg(GIOChannel *source, GIOCondition condition,
+	struct watcher_proxy_data *proxy_data)
+{
+	GIOStatus status;
+	gchar buffer[LINE_MAX];
+	gsize bytes_read;
+	GError *error = NULL;
+=======
  * \return \c true on success, else \c false.
  */
 static gboolean
@@ -222,12 +240,28 @@ cc_proxy_msg_read (GIOChannel *source, GIOCondition condition,
 	gsize len = 0;
 	GError *error = NULL;
 	struct proxy_msg msg = { 0 };
+>>>>>>> jodh-intel/wip/hyperstart-launch-cc-shim-and-talk-to-hyperstart
 
 	if (condition == G_IO_HUP) {
 		g_io_channel_unref(source);
 		goto out;
 	}
 
+<<<<<<< HEAD
+	/* read and print all chars */
+	while(true) {
+		status = g_io_channel_read_chars (source, buffer, sizeof(buffer),
+				&bytes_read, &error);
+		if (status == G_IO_STATUS_EOF) {
+			goto out;
+		}
+		if (status != G_IO_STATUS_NORMAL) {
+			break;
+		}
+		g_string_append_len(proxy_data->msg_received,
+				buffer, (gssize)bytes_read);
+	}
+=======
 	/* read length of message data that follows */
 	do {
 		status = g_io_channel_read_chars (source,
@@ -259,6 +293,7 @@ cc_proxy_msg_read (GIOChannel *source, GIOCondition condition,
 		g_string_append_len(proxy_data->msg_received,
 				buffer, (gssize)bytes_read);
 	} while (status == G_IO_STATUS_AGAIN);
+>>>>>>> jodh-intel/wip/hyperstart-launch-cc-shim-and-talk-to-hyperstart
 
 	if (status == G_IO_STATUS_ERROR) {
 		g_debug ("proxy read failed: %s", error->message);
@@ -283,17 +318,27 @@ out:
  * \param condition GIOCondition.
  * \param proxy_data struct watcher_proxy_data.
  *
+<<<<<<< HEAD
+ * \return \c false
+ */
+static gboolean
+cc_proxy_write_msg(GIOChannel *source, GIOCondition condition,
+=======
  * \return \c true on success, else \c false.
  */
 static gboolean
 cc_proxy_msg_write (GIOChannel *source, GIOCondition condition,
+>>>>>>> jodh-intel/wip/hyperstart-launch-cc-shim-and-talk-to-hyperstart
 	struct watcher_proxy_data *proxy_data)
 {
 	gsize bytes_written = 0;
 	gsize len = 0;
 	GIOStatus status;
 	GError *error = NULL;
+<<<<<<< HEAD
+=======
 	struct proxy_msg msg = { 0 };
+>>>>>>> jodh-intel/wip/hyperstart-launch-cc-shim-and-talk-to-hyperstart
 
 	if (condition == G_IO_HUP) {
 		g_io_channel_unref(source);
@@ -302,6 +347,9 @@ cc_proxy_msg_write (GIOChannel *source, GIOCondition condition,
 
 	len = g_utf8_strlen(proxy_data->msg_to_send, -1);
 
+<<<<<<< HEAD
+	g_debug("writing message to proxy socket: %s",
+=======
 	msg.length = htonl ((guint32)len);
 	msg.data = proxy_data->msg_to_send;
 
@@ -325,14 +373,19 @@ cc_proxy_msg_write (GIOChannel *source, GIOCondition condition,
 	}
 
 	g_debug("writing message data to proxy socket: %s",
+>>>>>>> jodh-intel/wip/hyperstart-launch-cc-shim-and-talk-to-hyperstart
 			proxy_data->msg_to_send);
 
 	do {
 		status = g_io_channel_write_chars(source,
 				proxy_data->msg_to_send,
+<<<<<<< HEAD
+				(gssize)len, &bytes_written, &error);
+=======
 				(gssize)len,
 				&bytes_written,
 				&error);
+>>>>>>> jodh-intel/wip/hyperstart-launch-cc-shim-and-talk-to-hyperstart
 	} while (status == G_IO_STATUS_AGAIN);
 
 	if (status == G_IO_STATUS_ERROR) {
@@ -342,7 +395,11 @@ cc_proxy_msg_write (GIOChannel *source, GIOCondition condition,
 	}
 
 	do {
+<<<<<<< HEAD
+		status = g_io_channel_flush(source, &error);
+=======
 		status = g_io_channel_flush (source, &error);
+>>>>>>> jodh-intel/wip/hyperstart-launch-cc-shim-and-talk-to-hyperstart
 	} while (status == G_IO_STATUS_AGAIN);
 
 	if (status == G_IO_STATUS_ERROR) {
@@ -356,12 +413,20 @@ cc_proxy_msg_write (GIOChannel *source, GIOCondition condition,
 	 * register a handler to wait for a reply.
 	 */
 	g_io_add_watch(source, G_IO_IN | G_IO_HUP,
+<<<<<<< HEAD
+	    (GIOFunc)cc_proxy_read_msg, proxy_data);
+=======
 	    (GIOFunc)cc_proxy_msg_read, proxy_data);
+>>>>>>> jodh-intel/wip/hyperstart-launch-cc-shim-and-talk-to-hyperstart
 
 out:
 	/* unregister this watcher */
 	return false;
 }
+<<<<<<< HEAD
+
+=======
+>>>>>>> jodh-intel/wip/hyperstart-launch-cc-shim-and-talk-to-hyperstart
 /**
  * Callback used to monitor CTL socket creation
  *
@@ -391,9 +456,15 @@ cc_proxy_ctl_socket_created_callback(GFileMonitor *monitor, GFile *file,
  *
  *     {"success": [true|false], "error": "an explanation" }
  *
+<<<<<<< HEAD
+ * \param data \ref watcher_proxy_data.
+ * \param proxy_success \c true if the last proxy command was
+ * successful, else \c false.
+=======
  * \param response \c GString containing raw proxy response message.
  * \param[out] proxy_success \c true if the last proxy command was
  *   successful, else \c false.
+>>>>>>> jodh-intel/wip/hyperstart-launch-cc-shim-and-talk-to-hyperstart
  *
  * \return \c true if the proxy response could be checked,
  * else \c false.
@@ -494,7 +565,11 @@ cc_proxy_run_cmd(struct cc_proxy *proxy,
 
 	/* add a watcher for proxy's socket stdin */
 	g_io_add_watch(channel, G_IO_OUT | G_IO_HUP,
+<<<<<<< HEAD
+	    (GIOFunc)cc_proxy_write_msg, &proxy_data);
+=======
 	    (GIOFunc)cc_proxy_msg_write, &proxy_data);
+>>>>>>> jodh-intel/wip/hyperstart-launch-cc-shim-and-talk-to-hyperstart
 
 	g_debug ("communicating with proxy");
 
@@ -528,7 +603,11 @@ out:
  * \return \c true on success, else \c false.
  */
 static gboolean
+<<<<<<< HEAD
+cc_proxy_hello (struct cc_proxy *proxy, const char *container_id)
+=======
 cc_proxy_cmd_hello (struct cc_proxy *proxy, const char *container_id)
+>>>>>>> jodh-intel/wip/hyperstart-launch-cc-shim-and-talk-to-hyperstart
 {
 	JsonObject        *obj = NULL;
 	JsonObject        *data = NULL;
@@ -596,8 +675,8 @@ out:
 	return ret;
 }
 
-
 /**
+<<<<<<< HEAD
  * Attach current proxy connection to a
  * previous registered VM (hello command)
  *
@@ -610,67 +689,7 @@ static gboolean
 cc_proxy_attach (struct cc_proxy *proxy, const char *container_id)
 {
 
-	JsonObject        *obj = NULL;
-	JsonObject        *data = NULL;
-	JsonNode          *root = NULL;
-	JsonGenerator     *generator = NULL;
-	gchar             *msg_to_send = NULL;
-	GString           *msg_received = NULL;
-	gboolean           ret = false;
-
-	/* The name of the command used to initiate communicate
-	 * with the proxy.
-	 */
-	const gchar       *proxy_cmd = "attach";
-
-	if (! (proxy && proxy->socket && container_id)) {
-		return false;
-	}
-
-	obj = json_object_new ();
-	data = json_object_new ();
-
-	json_object_set_string_member (obj, "id", proxy_cmd);
-
-	json_object_set_string_member (data, "containerId",
-			container_id);
-
-	json_object_set_object_member (obj, "data", data);
-
-	root = json_node_new (JSON_NODE_OBJECT);
-	generator = json_generator_new ();
-	json_node_take_object (root, obj);
-
-	json_generator_set_root (generator, root);
-	g_object_set (generator, "pretty", FALSE, NULL);
-
-	msg_to_send = json_generator_to_data (generator, NULL);
-
-	msg_received = g_string_new("");
-
-	if (! cc_proxy_run_cmd(proxy, msg_to_send, msg_received)) {
-		g_critical("failed to run proxy command %s: %s",
-				proxy_cmd,
-				msg_received->str);
-		goto out;
-	}
-
-	ret = true;
-
-	g_debug("msg received: %s", msg_received->str);
-
-out:
-	if (msg_received) {
-		g_string_free(msg_received, true);
-	}
-	if (obj) {
-		json_object_unref (obj);
-	}
-
-	return ret;
-}
-
-/**
+=======
  * Send the final message to the proxy.
  *
  * \param proxy \ref cc_proxy.
@@ -680,6 +699,7 @@ out:
 gboolean
 cc_proxy_cmd_bye (struct cc_proxy *proxy)
 {
+>>>>>>> jodh-intel/wip/hyperstart-launch-cc-shim-and-talk-to-hyperstart
 	JsonObject        *obj = NULL;
 	JsonObject        *data = NULL;
 	JsonNode          *root = NULL;
@@ -688,6 +708,17 @@ cc_proxy_cmd_bye (struct cc_proxy *proxy)
 	GString           *msg_received = NULL;
 	gboolean           ret = false;
 
+<<<<<<< HEAD
+	/* The name of the command used to initiate communicate
+	 * with the proxy.
+	 */
+	const gchar       *proxy_cmd = "attach";
+
+	if (! (proxy && proxy->socket && container_id)) {
+		return false;
+	}
+
+=======
 	/* The name of the proxy command used to terminate
 	 * communications.
 	 */
@@ -702,11 +733,20 @@ cc_proxy_cmd_bye (struct cc_proxy *proxy)
 		return ret;
 	}
 
+>>>>>>> jodh-intel/wip/hyperstart-launch-cc-shim-and-talk-to-hyperstart
 	obj = json_object_new ();
 	data = json_object_new ();
 
 	json_object_set_string_member (obj, "id", proxy_cmd);
 
+<<<<<<< HEAD
+	json_object_set_string_member (data, "containerId",
+			container_id);
+
+	json_object_set_object_member (obj, "data", data);
+
+=======
+>>>>>>> jodh-intel/wip/hyperstart-launch-cc-shim-and-talk-to-hyperstart
 	root = json_node_new (JSON_NODE_OBJECT);
 	generator = json_generator_new ();
 	json_node_take_object (root, obj);
@@ -716,10 +756,17 @@ cc_proxy_cmd_bye (struct cc_proxy *proxy)
 
 	msg_to_send = json_generator_to_data (generator, NULL);
 
+<<<<<<< HEAD
+	msg_received = g_string_new("");
+
+	if (! cc_proxy_run_cmd(proxy, msg_to_send, msg_received)) {
+		g_critical("failed to run proxy command %s: %s",
+=======
 	msg_received = g_string_new ("");
 
 	if (! cc_proxy_run_cmd (proxy, msg_to_send, msg_received)) {
 		g_critical ("failed to run proxy command %s: %s",
+>>>>>>> jodh-intel/wip/hyperstart-launch-cc-shim-and-talk-to-hyperstart
 				proxy_cmd,
 				msg_received->str);
 		goto out;
@@ -741,6 +788,8 @@ out:
 }
 
 /**
+<<<<<<< HEAD
+=======
  * Ask the proxy to allocate I/O stream "sequence numbers".
  *
  * \param proxy \ref cc_proxy.
@@ -765,6 +814,7 @@ cc_proxy_cmd_allocate_io (struct cc_proxy *proxy)
 }
 
 /**
+>>>>>>> jodh-intel/wip/hyperstart-launch-cc-shim-and-talk-to-hyperstart
  * Connect to \ref CC_OCI_PROXY and wait until it is ready.
  *
  * \param config \ref cc_oci_config.
@@ -809,7 +859,11 @@ cc_proxy_wait_until_ready (struct cc_oci_config *config)
 		}
 	}
 
+<<<<<<< HEAD
+	if (! cc_proxy_hello (config->proxy, config->optarg_container_id)) {
+=======
 	if (! cc_proxy_cmd_hello (config->proxy, config->optarg_container_id)) {
+>>>>>>> jodh-intel/wip/hyperstart-launch-cc-shim-and-talk-to-hyperstart
 		return false;
 	}
 out:
@@ -833,7 +887,11 @@ out:
  *
  * \param config \ref cc_oci_config.
  * \param cmd Name of hyper command to run.
+<<<<<<< HEAD
+ * \param data payload to pass to \p cmd (optional).
+=======
  * \param payload \c JsonObject to send as message data.
+>>>>>>> jodh-intel/wip/hyperstart-launch-cc-shim-and-talk-to-hyperstart
  *
  * \return \c true on success, else \c false.
  */
@@ -904,6 +962,82 @@ out:
 }
 
 /**
+<<<<<<< HEAD
+ * Request \ref CC_OCI_PROXY to allocate IO stream
+ * sequence for use with a process to be executed, 
+ * IO stream numebers would be handled by \ref CC_OCI_SHIM.
+ *
+ * \note Must already be connected to the proxy.
+ *
+ * \param config \ref cc_oci_config.
+ *
+ * \return \c true on success, else \c false.
+ */
+gboolean
+cc_proxy_allocate_io (struct cc_oci_config *config)
+{
+	JsonObject        *obj = NULL;
+	JsonObject        *data = NULL;
+	JsonNode          *root = NULL;
+	JsonGenerator     *generator = NULL;
+	gchar             *msg_to_send = NULL;
+	GString           *msg_received = NULL;
+	gboolean           ret = false;
+
+	const gchar       *proxy_cmd = "allocateIO";
+	/* allocate 2 streams, stdio and stderr */
+	int n_streams = 2;
+
+	if (! (config && config->proxy)) {
+		return false;
+	}
+
+	obj = json_object_new ();
+	data = json_object_new ();
+
+	json_object_set_string_member (obj, "id", proxy_cmd);
+
+	json_object_set_int_member (data, "nStreams",
+		n_streams);
+
+	json_object_set_object_member (obj, "data", data);
+
+	root = json_node_new (JSON_NODE_OBJECT);
+	generator = json_generator_new ();
+	json_node_take_object (root, obj);
+
+	json_generator_set_root (generator, root);
+	g_object_set (generator, "pretty", FALSE, NULL);
+
+	msg_to_send = json_generator_to_data (generator, NULL);
+
+	msg_received = g_string_new("");
+
+	if (! cc_proxy_run_cmd(config->proxy, msg_to_send, msg_received)) {
+		g_critical("failed to run proxy command %s: %s",
+				proxy_cmd,
+				msg_received->str);
+		goto out;
+	}
+
+	ret = true;
+
+	g_debug("msg received: %s", msg_received->str);
+
+out:
+	if (msg_received) {
+		g_string_free(msg_received, true);
+	}
+	if (obj) {
+		json_object_unref (obj);
+	}
+
+	return ret;
+}
+
+/**
+=======
+>>>>>>> jodh-intel/wip/hyperstart-launch-cc-shim-and-talk-to-hyperstart
  * Request \ref CC_OCI_PROXY create a new POD (container group).
  *
  * \note Must already be connected to the proxy.
@@ -956,6 +1090,7 @@ out:
 
 	return ret;
 }
+<<<<<<< HEAD
 
 /**
  * Request \ref CC_OCI_PROXY to start a new container
@@ -1085,3 +1220,5 @@ out:
 
        return ret;
 }
+=======
+>>>>>>> jodh-intel/wip/hyperstart-launch-cc-shim-and-talk-to-hyperstart
