@@ -1058,7 +1058,6 @@ cc_proxy_hyper_new_container (struct cc_oci_config *config)
        JsonObject *process = NULL;
        JsonArray *args= NULL;
        JsonArray *envs= NULL;
-       gchar     **strvp = NULL;
        gboolean ret = false;
 
        if (! (config && config->proxy)) {
@@ -1132,26 +1131,20 @@ cc_proxy_hyper_new_container (struct cc_oci_config *config)
 		       config->oci.process.stderr_stream);
 
        /* initial workload from config */
-       strvp = config->oci.process.args;
-       while (*strvp != NULL) {
-               json_array_add_string_element (args, *strvp);
-               strvp++;
+       for (gchar** p = config->oci.process.args; p && *p; p++) {
+	       json_array_add_string_element (args, *p);
        }
 
-#if 0
-       /* FIXME: Split config.process.env to get key values (KEY=VALUE) */
-       strvp = config->oci.process.env;
-       while (*strvp != NULL) {
-		var, val = split (strvp, = );
-		json_array_add_object_element (envs, env_var);
-		strvp++;
+       for (gchar** p = config->oci.process.env; p && *p; p++) {
+	       JsonObject *env_var = json_object_new ();
+	       /* Split config.process.env to get key values (KEY=VALUE) */
+	       char *e = g_strstr_len (*p, -1, "=");
+	       *e = '\0';
+	       e++;
+	       json_object_set_string_member (env_var, "value", e);
+	       json_object_set_string_member (env_var, "env", *p);
+	       json_array_add_object_element (envs, env_var);
        }
-#else
-	JsonObject *env_var = json_object_new ();
-	json_object_set_string_member (env_var, "env", "PATH");
-	json_object_set_string_member (env_var, "value", "/bin:/usr/bin");
-	json_array_add_object_element (envs, env_var);
-#endif
 
        json_object_set_string_member (process, "workdir",
 		       config->oci.process.cwd);
@@ -1171,7 +1164,7 @@ cc_proxy_hyper_new_container (struct cc_oci_config *config)
 
        if (! cc_proxy_run_hyper_cmd (config, "newcontainer",
 			       newcontainer_payload)) {
-               g_critical("failed to start new container");
+               g_critical("failed to run pod create");
                goto out;
        }
 
