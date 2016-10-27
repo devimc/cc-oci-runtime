@@ -89,5 +89,6 @@ gboolean cc_oci_fd_set_cloexec (int fd);
 gboolean cc_oci_fd_valid (int fd);
 gboolean cc_oci_enable_networking (void);
 gboolean cc_oci_set_std_fds (void);
+guint32 cc_oci_get_big_endian_32(char *buf);
 
 #endif /* _CC_OCI_UTIL_H */

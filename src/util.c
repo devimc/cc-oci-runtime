@@ -644,6 +644,15 @@ cc_oci_enable_networking (void)
 	return enable;
 }
 
+/*!
+ * Convert the value stored in buffer to little endian
+ *
+ * \param buf Buffer storing the big endian value
+ */
+guint32 cc_oci_get_big_endian_32(char *buf) {
+	return (guint32)(buf[0] >> 24 | buf[1] >> 16 | buf[2] >> 8 | buf[3]);
+}
+
 #ifdef DEBUG
 static gboolean
 cc_oci_node_dump_aux(GNode* node, gpointer data) {

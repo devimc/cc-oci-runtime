@@ -555,6 +555,7 @@ cc_shim_launch (struct cc_oci_config *config,
 		gchar   **args = NULL;
 		ssize_t   bytes;
 		int       proxy_socket_fd = -1;
+		int       proxy_io_fd = -1;
 
 		/* child */
 
@@ -570,13 +571,24 @@ cc_shim_launch (struct cc_oci_config *config,
 		bytes = read (shim_args_pipe[0],
 				&proxy_socket_fd,
 				sizeof (proxy_socket_fd));
-		close (shim_args_pipe[0]);
-		shim_args_pipe[0] = -1;
 
 		if (bytes <= 0) {
 			g_critical ("failed to read proxy socket fd");
 			goto child_failed;
 		}
+
+		/* block reading proxy IO fd */
+		bytes = read (shim_args_pipe[0],
+				&proxy_io_fd,
+				sizeof (proxy_io_fd));
+
+		if (bytes <= 0) {
+			g_critical ("failed to read proxy IO fd");
+			goto child_failed;
+		}
+
+		close (shim_args_pipe[0]);
+		shim_args_pipe[0] = -1;
 
 		g_debug ("proxy socket fd from parent=%d",
 				proxy_socket_fd);
@@ -588,15 +600,6 @@ cc_shim_launch (struct cc_oci_config *config,
 
 		/* +1 for for NULL terminator */
 
-		/* FIXME: uncomment once we have run "AllocateIO" */
-#if 1
-		args = g_new0 (gchar *, 5+1);
-		args[0] = g_strdup (CC_OCI_SHIM);
-		args[1] = g_strdup ("-c");
-		args[2] = g_strdup (config->optarg_container_id);
-		args[3] = g_strdup ("-p");
-		args[4] = g_strdup_printf ("%d", proxy_socket_fd);
-#else
 		args = g_new0 (gchar *, 9+1);
 		args[0] = g_strdup (CC_OCI_SHIM);
 		args[1] = g_strdup ("-c");
@@ -606,8 +609,8 @@ cc_shim_launch (struct cc_oci_config *config,
 		args[5] = g_strdup ("-o");
 		args[6] = g_strdup_printf ("%d", proxy_io_fd);
 		args[7] = g_strdup ("-s");
-		args[8] = g_strdup_printf ("%d", proxy_io_seq_no);
-#endif
+		/* FIXME: proxy_io_seq_no */
+		args[8] = g_strdup_printf ("%d", 1);
 
 		g_debug ("running command:");
 		for (gchar** p = args; p && *p; p++) {
@@ -629,6 +632,8 @@ child_failed:
 		/* Any data written by the child to this pipe signifies failure,
 		 * so send a very short message ("E", denoting Error).
 		 */
+		close (shim_args_pipe[0]);
+		shim_args_pipe[0] = -1;
 		(void)write (child_err_pipe[1], "E", 1);
 		exit (EXIT_FAILURE);
 	}
@@ -680,6 +685,7 @@ cc_oci_vm_launch (struct cc_oci_config *config)
 	int                shim_err_fd = -1;
 	int                shim_args_fd = -1;
 	int                proxy_fd = -1;
+	int                proxy_io_fd = -1;
 
 	setup_networking = cc_oci_enable_networking ();
 
@@ -954,10 +960,6 @@ child_failed:
 		goto out;
 	}
 
-	/* FIXME: TODO: call cc_proxy_cmd_allocate_io () to get
-	 * sequence numbers and pass to cc-shim via shim_args_fd.
-	 */
-
 	proxy_fd = g_socket_get_fd (config->proxy->socket);
 	if (proxy_fd < 0) {
 		g_critical ("invalid proxy fd: %d", proxy_fd);
@@ -967,6 +969,17 @@ child_failed:
 	bytes = write (shim_args_fd, &proxy_fd, sizeof (proxy_fd));
 	if (bytes < 0) {
 		g_critical ("failed to send proxy fd to shim child: %s",
+			strerror (errno));
+		goto out;
+	}
+
+	if (! cc_proxy_cmd_allocate_io(config->proxy, &proxy_io_fd)) {
+		goto out;
+	}
+
+	bytes = write (shim_args_fd, &proxy_io_fd, sizeof (proxy_io_fd));
+	if (bytes < 0) {
+		g_critical ("failed to send proxy IO fd to shim child: %s",
 			strerror (errno));
 		goto out;
 	}
