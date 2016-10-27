@@ -35,6 +35,7 @@
 #include "../src/runtime.h"
 #include "../src/state.h"
 #include "../src/proxy.h"
+#include "../src/oci.h"
 
 
 gboolean cc_oci_vm_running (const struct oci_state *state);
@@ -813,9 +814,6 @@ START_TEST(test_cc_oci_vm_running) {
 	ck_assert (! cc_oci_vm_running (&state));
 
 } END_TEST
-
-	config = cc_oci_config_create ();
-	ck_assert (config);
 
 START_TEST(test_get_user_home_dir) {
 	struct cc_oci_config *config = NULL;
