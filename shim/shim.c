@@ -23,7 +23,6 @@
 #include <poll.h>
 #include <assert.h>
 #include <stdarg.h>
-#include <fcntl.h>
 #include <unistd.h>
 #include <signal.h>
 #include <termios.h>
@@ -34,6 +33,7 @@
 #include <stdbool.h>
 #include <limits.h>
 
+#include "utils.h"
 #include "log.h"
 #include "shim.h"
 
@@ -82,6 +82,26 @@ signal_handler(int signal_no)
 }
 
 /*!
+ * Assign signal handler for all the signals that should be
+ * forwarded by the shim to the proxy.
+ *
+ * \param sa Signal handler
+ * \return true on success, false otherwise
+ */
+bool
+assign_all_signals(struct sigaction *sa)
+{
+        for (int i = 0; shim_signal_table[i]; i++) {
+                if (sigaction(shim_signal_table[i], sa, NULL) == -1) {
+			shim_error("Error assigning signal handler for %d : %s\n",
+				shim_signal_table[i], strerror(errno));
+                        return false;
+                }
+        }
+        return true;
+}
+
+/*!
  * Print formatted message to stderr and exit with EXIT_FAILURE
  *
  * \param format Format that specifies how subsequent arguments are
@@ -103,105 +123,31 @@ err_exit(const char *format, ...)
 }
 
 /*!
- * Set file descriptor as non-blocking
+ * Construct message in the proxy ctl rpc protocol format
+ * Proxy control message format:
  *
- * \param fd File descriptor to set as non-blocking
- */
-void
-set_fd_nonblocking(int fd)
-{
-	int flags;
-
-	if (fd < 0) {
-		return;
-	}
-
-	flags = fcntl(fd, F_GETFL);
-	if (flags == -1) {
-		err_exit("Error getting status flags for fd: %s\n", strerror(errno));
-	}
-	flags |= O_NONBLOCK;
-
-	if (fcntl(fd, F_SETFL, flags) == -1) {
-		err_exit("Error setting fd as nonblocking: %s\n", strerror(errno));
-	}
-}
-
-/*!
- * Store integer as big endian in buffer
- *
- * \param buf Buffer to store the value in
- * \param val Integer to be converted to big endian
- */
-void
-set_big_endian_32(uint8_t *buf, uint32_t val)
-{
-        buf[0] = (uint8_t)(val >> 24);
-        buf[1] = (uint8_t)(val >> 16);
-        buf[2] = (uint8_t)(val >> 8);
-        buf[3] = (uint8_t)val;
-}
-
-/*!
- * Convert the value stored in buffer to little endian
- *
- * \param buf Buffer storing the big endian value
- */
-uint32_t get_big_endian_32(char *buf) {
-	return (uint32_t)(buf[0] >> 24 | buf[1] >> 16 | buf[2] >> 8 | buf[3]);
-}
-
-/*!
- * Store 64 bit value in network byte order in buffer
- *
- * \param buf Buffer to store the value in
- * \param val 64 bit value to be converted to big endian
- */
-void
-set_big_endian_64(uint8_t *buf, uint64_t val)
-{
-	set_big_endian_32(buf, val >> 32);
-	set_big_endian_32(buf + 4, (uint32_t)val);
-}
-
-/*!
- * Convert 64 bit value stored in buffer to little endian
- *
- * \param buf Buffer storing the big endian value
- */
-uint64_t get_big_endian_64(char *buf) {
-	uint64_t val;
-
-	val = (get_big_endian_32(buf) << 32) | get_big_endian_32(buf+4);
-	return val;
-}
-
-/*!
- * Construct message in the hyperstart control format
- * Hyperstart control message format:
- *
- * | ctrl id | length  | payload (length-8)      |
+ * | length  | Reserved| Data(Request/Response   |
  * | . . . . | . . . . | . . . . . . . . . . . . |
  * 0         4         8                         length
  *
  * \param json Json Payload
- * \param hyper_cmd_type Hyperstart control id
- * \param len Length of the message
- */  
+ * \param[out] len Length of the message
+ */
 char*
-get_hypertart_msg(char *json, int hyper_cmd_type, size_t *len) {
-	char *hyperstart_msg = NULL;
+get_proxy_ctl_msg(char *json, size_t *len) {
+	char *proxy_ctl_msg = NULL;
 
 	*len = strlen(json) + 8 + 1;
-	hyperstart_msg = malloc(sizeof(char) * *len);
-	if (! hyperstart_msg) {
+	proxy_ctl_msg = malloc(sizeof(char) * *len);
+	if (! proxy_ctl_msg) {
 		abort();
 	}
-	set_big_endian_32((uint8_t*)hyperstart_msg, (uint32_t)hyper_cmd_type);
-	set_big_endian_32((uint8_t*)hyperstart_msg+4, (uint32_t)(strlen(json) + 8));
-	strcpy(hyperstart_msg+8, json);
 
-	return hyperstart_msg;
+	set_big_endian_32((uint8_t*)proxy_ctl_msg + PROXY_CTL_HEADER_LENGTH_OFFSET, 
+				(uint32_t)(strlen(json) + PROXY_CTL_HEADER_SIZE));
+	strcpy(proxy_ctl_msg + PROXY_CTL_HEADER_SIZE, json);
+
+	return proxy_ctl_msg;
  }
 
 /*!
@@ -213,10 +159,11 @@ get_hypertart_msg(char *json, int hyper_cmd_type, size_t *len) {
  */
 void
 send_proxy_hyper_message(int fd, int hyper_cmd_type, char *json) {
-	char *proxy_hyper_msg = NULL;
-	size_t len, offset = 0;
-	ssize_t ret;
-	char *proxy_command_id = "hyper";
+	char      *proxy_payload = NULL;
+	char      *proxy_command_id = "hyper";
+	char      *proxy_ctl_msg = NULL;
+	size_t     len, offset = 0;
+	ssize_t    ret;
 
 	/* cc-proxy has the following format for "hyper" payload:
 	 * {
@@ -228,7 +175,7 @@ send_proxy_hyper_message(int fd, int hyper_cmd_type, char *json) {
 	 * }
 	*/
 
-	ret = asprintf(&proxy_hyper_msg,
+	ret = asprintf(&proxy_payload,
 			"{\"id\":\"%s\",\"data\":{\"hyperName\":\"%d\",\"data\":\"%s\"",
 			proxy_command_id, hyper_cmd_type, json);
 
@@ -236,20 +183,21 @@ send_proxy_hyper_message(int fd, int hyper_cmd_type, char *json) {
 		abort();
 	}
 
-	len = strlen(proxy_hyper_msg + 1);
+	proxy_ctl_msg = get_proxy_ctl_msg(proxy_payload, &len);
+	free(proxy_payload);
 
 	while (offset < len) {
-		ret = write(fd, proxy_hyper_msg + offset, len-offset);
+		ret = write(fd, proxy_ctl_msg + offset, len-offset);
 		if (ret == EINTR) {
 			continue;
 		}
 		if (ret <= 0 ) {
-			free(proxy_hyper_msg);
+			free(proxy_ctl_msg);
 			return;
 		}
 		offset += (size_t)ret;
 	}
-	free(proxy_hyper_msg);
+	free(proxy_ctl_msg);
 }
 
 /*!
@@ -272,6 +220,7 @@ handle_signals(char *container_id, int outfd) {
 	}
 
 	while (read(signal_pipe_fd[0], &sig, sizeof(sig)) != -1) {
+		printf("Handling signal : %d on fd %d\n", sig, signal_pipe_fd[0]);
 		if (sig == SIGWINCH ) {
 			cmd_type = WINSIZE;
 			if (ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) == -1) {
@@ -324,7 +273,7 @@ handle_stdin(struct cc_shim *shim)
 		set_big_endian_32 ((uint8_t*)wbuf, (uint32_t)len);
 		strncpy(wbuf, buf, (size_t)nread);
 
-		// TODO: handle write in the poll loop perhaps to account for write blocking
+		// TODO: handle write in the poll loop to account for write blocking
 		ret = (int)write(shim->proxy_io_fd, wbuf, (size_t)nread);
 		if (ret == -1) {
 			shim_warning("Error writing from fd %d to fd %d: %s\n",
@@ -334,7 +283,17 @@ handle_stdin(struct cc_shim *shim)
 	}
 }
 
-char* read_IO_message(struct cc_shim *shim, uint64_t *seq, ssize_t *stream_len) {
+/*!
+ * Read and parse I/O message on proxy I/O fd
+ *
+ * \param shim \ref cc_shim
+ * \param[out] seq Seqence number of the I/O stream
+ * \param[out] stream_len Length of the data received
+ *
+ * \return newly allocated string on success, else \c NULL.
+ */
+char*
+read_IO_message(struct cc_shim *shim, uint64_t *seq, ssize_t *stream_len) {
 	char *buf = NULL;
 	ssize_t need_read = STREAM_HEADER_SIZE;
 	ssize_t bytes_read = 0, want, ret;
@@ -384,6 +343,11 @@ char* read_IO_message(struct cc_shim *shim, uint64_t *seq, ssize_t *stream_len) 
 	return buf;
 }
 
+/*!
+ * Handle output on the proxy I/O fd
+ *
+ *\param shim \ref cc_shim
+ */
 void
 handle_proxy_output(struct cc_shim *shim)
 {
@@ -416,7 +380,7 @@ handle_proxy_output(struct cc_shim *shim)
 		return;
 	}
 
-	/* TODO: what if writing to stdout/err blocks? Perhaps add this to the poll loop
+	/* TODO: what if writing to stdout/err blocks? Add this to the poll loop
 	 * to watch out for EPOLLOUT
 	 */
 	while (offset < stream_len) {
@@ -430,7 +394,13 @@ handle_proxy_output(struct cc_shim *shim)
 	free(buf);
 }
 
-void handle_proxy_ctl(struct cc_shim *shim)
+/*!
+ * Handle data on the proxy ctl socket fd
+ *
+ *\param shim \ref cc_shim
+ */
+void
+handle_proxy_ctl(struct cc_shim *shim)
 {
 	char buf[LINE_MAX];
 	ssize_t ret;
@@ -445,7 +415,7 @@ void handle_proxy_ctl(struct cc_shim *shim)
 	}
 
 	//TODO: Parse the json and log error responses explicitly
-	shim_debug("Proxy response:%s\n", buf);
+	shim_debug("Proxy response:%s\n", buf + PROXY_CTL_HEADER_SIZE);
 }
 
 long long
@@ -509,7 +479,7 @@ main(int argc, char **argv)
 		{ 0, 0, 0, 0},
 	};
 
-	while ((c = getopt_long(argc, argv, "c:p:h", prog_opts, NULL))!= -1) {
+	while ((c = getopt_long(argc, argv, "c:p:o:s:e:dh", prog_opts, NULL))!= -1) {
 		switch (c) {
 			case 'c':
 				shim.container_id = strdup(optarg);
@@ -577,22 +547,26 @@ main(int argc, char **argv)
 
 	// Add read end of pipe to pollfd list and make it non-bocking
 	add_pollfd(poll_fds, &nfds, signal_pipe_fd[0], POLLIN | POLLPRI);
-	set_fd_nonblocking(signal_pipe_fd[0]);
-	set_fd_nonblocking(signal_pipe_fd[1]);
+	if (! set_fd_nonblocking(signal_pipe_fd[0])) {
+		exit(EXIT_FAILURE);
+	}
+	if (! set_fd_nonblocking(signal_pipe_fd[1])) {
+		exit(EXIT_FAILURE);
+	}
 
 	sigemptyset(&sa.sa_mask);
 	sa.sa_flags = SA_RESTART;           /* Restart interrupted reads()s */
 	sa.sa_handler = signal_handler;
 
-	/* TODO: Add signal handler for all signals */
-	if (sigaction(SIGINT, &sa, NULL) == -1)
+	// Change the default action of all signals that should be forwarded to proxy
+	if (! assign_all_signals(&sa)) {
 		err_exit("sigaction");
-	if (sigaction(SIGTERM, &sa, NULL) == -1)
-		err_exit("sigaction");
-	if (sigaction(SIGWINCH, &sa, NULL) == -1)
-		err_exit("sigaction");
+	}
 
-	set_fd_nonblocking(STDIN_FILENO);
+	if ( !set_fd_nonblocking(STDIN_FILENO)) {
+		exit(EXIT_FAILURE);
+	}
+
 	add_pollfd(poll_fds, &nfds, STDIN_FILENO, POLLIN | POLLPRI);
 
 	add_pollfd(poll_fds, &nfds, shim.proxy_io_fd, POLLIN | POLLPRI);
@@ -637,7 +611,7 @@ main(int argc, char **argv)
 		}
 
 		// check for proxy sockfd
-		if (poll_fds[2].revents != 0) {
+		if (poll_fds[3].revents != 0) {
 			handle_proxy_ctl(&shim);
 		}
 	}
