@@ -1445,6 +1445,35 @@ out:
 	return true;
 }
 
+/*!
+ * List running processes inside the container.
+ *
+ * \param config \ref cc_oci_config.
+ * \param state \ref oci_state.
+ *
+ * \return \c true on success, else \c false.
+ */
+gboolean
+cc_oci_ps (struct cc_oci_config *config,
+		struct oci_state *state,
+		const gchar **ps_args)
+{
+	gboolean ret = false;
+
+	if (! (config && state)){
+		return false;
+	}
+
+	if (cc_oci_vm_running (state)) {
+		ret = cc_proxy_hyper_ps_container(config, ps_args);
+	} else {
+		g_warning ("Cannot run ps on VM %s (pid %u) - "
+			"not running", state->id, state->pid);
+	}
+
+	return ret;
+}
+
 /**
  * Transfer certain elements from \p state to \p config.
  *

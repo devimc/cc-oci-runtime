@@ -52,6 +52,7 @@ const (
 	OnlineCPUMem     = "onlinecpumem"
 	SetupInterface   = "setupinterface"
 	SetupRoute       = "setuproute"
+	PsContainer      = "pscontainer"
 )
 
 var codeList = map[string]uint32{
@@ -76,6 +77,7 @@ var codeList = map[string]uint32{
 	OnlineCPUMem:     hyper.INIT_ONLINECPUMEM,
 	SetupInterface:   hyper.INIT_SETUPINTERFACE,
 	SetupRoute:       hyper.INIT_SETUPROUTE,
+	PsContainer:      999,
 }
 
 // Values related to the communication on control channel.

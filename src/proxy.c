@@ -1626,3 +1626,56 @@ out:
 	}
 	return ret;
 }
+
+/**
+ * Request \ref CC_OCI_PROXY to list running processes
+ *
+ * \param config \ref cc_oci_config.
+ *
+ * \return \c true on success, else \c false.
+ */
+gboolean
+cc_proxy_hyper_ps_container (struct cc_oci_config *config, const gchar **ps_args)
+{
+	JsonObject *ps_payload = NULL;
+	JsonArray  *args_array;
+	gboolean ret = false;
+
+	if (! (config && config->proxy)) {
+		return false;
+	}
+	if (! cc_proxy_connect (config->proxy)) {
+		return false;
+	}
+	if (! cc_proxy_attach (config->proxy, config->optarg_container_id)) {
+		goto out;
+	}
+
+	ps_payload = json_object_new ();
+
+	json_object_set_string_member (ps_payload, "container",
+			config->optarg_container_id);
+
+	args_array = json_array_new ();
+	for (const gchar** p = ps_args; p && *p; p++) {
+		json_array_add_string_element (args_array, *p);
+	}
+
+	json_object_set_array_member (ps_payload, "psargs", args_array);
+
+	if (! cc_proxy_run_hyper_cmd (config, "pscontainer", ps_payload)) {
+		g_critical("failed to run cmd pscontainer");
+		goto out;
+	}
+
+	ret = true;
+out:
+	if (ps_payload) {
+		json_object_unref (ps_payload);
+	}
+	if (config && config->proxy) {
+		cc_proxy_disconnect (config->proxy);
+	}
+
+	return ret;
+}

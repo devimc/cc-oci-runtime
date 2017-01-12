@@ -27,7 +27,9 @@ handler_ps (const struct subcommand *sub,
 		struct cc_oci_config *config,
 		int argc, char *argv[])
 {
-	gboolean   ret;
+	gboolean           ret;
+	struct oci_state  *state = NULL;
+	gchar             *config_file = NULL;
 
 	g_assert (sub);
 	g_assert (config);
@@ -45,9 +47,16 @@ handler_ps (const struct subcommand *sub,
 		return false;
 	}
 
-	//FIXME: implement ps, run ps inside the VM ?
+	ret = cc_oci_get_config_and_state (&config_file, config, &state);
+	if (! ret) {
+		goto out;
+	}
 
-	return true;
+	ret = cc_oci_ps (config, state, (const gchar**)&argv[1]);
+out:
+	g_free_if_set (config_file);
+	cc_oci_state_free (state);
+	return ret;
 }
 
 struct subcommand command_ps =
