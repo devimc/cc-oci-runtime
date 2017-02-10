@@ -1568,6 +1568,49 @@ out:
 	return ret;
 }
 
+gboolean
+cc_proxy_hyper_checkpoint_container (struct cc_oci_config *config)
+{
+	JsonObject *checkpointcontainer_payload;
+	gboolean    ret = false;
+	const gchar *container_id;
+
+	if (! (config && config->proxy)) {
+		return false;
+	}
+
+	container_id = cc_pod_container_id(config);
+	if (! container_id) {
+		return false;
+	}
+
+	if (! cc_proxy_connect (config->proxy)) {
+		return false;
+	}
+	if (! cc_proxy_attach (config->proxy, container_id)) {
+		return false;
+	}
+
+	checkpointcontainer_payload = json_object_new ();
+
+	json_object_set_string_member (checkpointcontainer_payload, "container",
+		config->optarg_container_id);
+
+	if (! cc_proxy_run_hyper_cmd (config, "checkpointcontainer", checkpointcontainer_payload)) {
+		g_critical("failed to run cmd checkpointcontainer");
+		goto out;
+	}
+
+	ret = true;
+out:
+
+	json_object_unref (checkpointcontainer_payload);
+
+	cc_proxy_disconnect (config->proxy);
+
+	return ret;
+}
+
 /**
  * Request \ref CC_OCI_PROXY to destroy the POD
  *

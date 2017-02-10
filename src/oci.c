@@ -425,6 +425,21 @@ cc_oci_kill (struct cc_oci_config *config,
 	return true;
 }
 
+gboolean
+cc_oci_checkpoint (struct cc_oci_config *config,
+		struct oci_state *state)
+{
+	if (! (config && state)) {
+		return false;
+	}
+
+	if (! cc_proxy_hyper_checkpoint_container (config)) {
+		return false;
+	}
+
+	return true;
+}
+
 /*!
  * Determine if the container is running.
  *

@@ -27,6 +27,8 @@ handler_checkpoint (const struct subcommand *sub,
 		int argc, char *argv[])
 {
 	gboolean  ret = true;
+	gchar    *config_file = NULL;
+	struct oci_state *state = NULL;
 
 	g_assert (sub);
 	g_assert (config);
@@ -36,12 +38,28 @@ handler_checkpoint (const struct subcommand *sub,
 		return ret;
 	}
 
+	config->optarg_container_id = argv[0];
+
 	if (! cc_oci_state_file_exists(config)) {
 		g_warning ("state file does not exist for container %s",
 				config->optarg_container_id);
 		ret = false;
 	}
 
+	ret = cc_oci_get_config_and_state (&config_file, config, &state);
+	if (! ret) {
+		goto out;
+	}
+
+	if (! cc_oci_config_update (config, state)) {
+		goto out;
+	}
+
+	ret = cc_oci_checkpoint (config, state);
+
+out:
+	g_free_if_set (config_file);
+	cc_oci_state_free (state);
 	return ret;
 }
 
